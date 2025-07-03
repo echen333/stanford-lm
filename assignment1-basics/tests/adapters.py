@@ -10,7 +10,6 @@ import torch
 from torch import Tensor
 
 
-
 def run_linear(
     d_in: int,
     d_out: int,
@@ -25,7 +24,7 @@ def run_linear(
         out_dim (int): The size of the output dimension
         weights (Float[Tensor, "d_out d_in"]): The linear weights to use
         in_features (Float[Tensor, "... d_in"]): The output tensor to apply the function to
-    
+
     Returns:
         Float[Tensor, "... d_out"]: The transformed output of your linear module.
     """
@@ -47,7 +46,7 @@ def run_embedding(
         d_model (int): The size of the embedding dimension
         weights (Float[Tensor, "vocab_size d_model"]): The embedding vectors to fetch from
         token_ids (Int[Tensor, "..."]): The set of token ids to fetch from the Embedding layer
-    
+
     Returns:
         Float[Tensor, "... d_model"]: Batch of embeddings returned by your Embedding layer.
     """
@@ -302,7 +301,7 @@ def run_transformer_lm(
             evenly divisible by `num_heads`.
         d_ff (int): Dimensionality of the feed-forward inner layer (section 3.3).
         rope_theta (float): The RoPE $\Theta$ parameter.
-        weights (dict[str, Tensor]): 
+        weights (dict[str, Tensor]):
             State dict of our reference implementation. {num_layers} refers to an
             integer between `0` and `num_layers - 1` (the layer index).
             The keys of this dictionary are:
@@ -435,7 +434,9 @@ def run_softmax(in_features: Float[Tensor, " ..."], dim: int) -> Float[Tensor, "
     raise NotImplementedError
 
 
-def run_cross_entropy(inputs: Float[Tensor, " batch_size vocab_size"], targets: Int[Tensor, " batch_size"]) -> Float[Tensor, ""]:
+def run_cross_entropy(
+    inputs: Float[Tensor, " batch_size vocab_size"], targets: Int[Tensor, " batch_size"]
+) -> Float[Tensor, ""]:
     """Given a tensor of inputs and targets, compute the average cross-entropy
     loss across examples.
 
@@ -588,4 +589,76 @@ def run_train_bpe(
                 representing that <token1> was merged with <token2>.
                 Merges are ordered by order of creation.
     """
-    raise NotImplementedError
+    PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+    import regex as re
+    from collections import defaultdict
+
+    vocab: dict[int, bytes] = {}
+    end_of_text_token = "<|endoftext|>"
+
+    vocab_cnt = 0
+
+    def add_vocab(word: bytes):
+        nonlocal vocab_cnt
+        vocab[vocab_cnt] = word
+        vocab_cnt += 1
+
+    add_vocab(end_of_text_token.encode())
+    for i in range(1, 257):
+        add_vocab(bytes([i - 1]))
+
+    freqs: dict[tuple[bytes], int] = defaultdict(int)
+    merges: list[tuple[bytes, bytes]] = []
+
+    with open(input_path, "r") as f:  # todo: split across boundaries no
+        for zz in f.read().split(end_of_text_token):
+            matches = re.finditer(PAT, zz)
+            for m in matches:
+                tmp = m.group().encode()
+                tmp2 = [bytes([x]) for x in tmp]
+                freqs[tuple(tmp2)] += 1
+
+    while vocab_cnt < vocab_size:
+        pairs: dict[tuple[bytes, bytes], int] = defaultdict(int)
+        for tup, cnt in freqs.items():
+            for i in range(len(tup) - 1):
+                pairs[(tup[i], tup[i + 1])] += cnt
+
+        # Find max in pairs to merge
+        to_merge: tuple[bytes, bytes] = None
+        to_merge_freq = 0
+        for x, y in pairs.items():
+            if y > to_merge_freq:
+                to_merge_freq = y
+                to_merge = x
+            elif y == to_merge_freq:
+                to_merge = max(to_merge, x)
+
+        print("to merge", to_merge, to_merge_freq)
+        if to_merge is None:
+            break
+        merged_bytes = to_merge[0] + to_merge[1]
+        add_vocab(merged_bytes)
+        merges.append(to_merge)
+
+        # Update freqs by merging old
+        freqs2 = defaultdict(int)
+        for tup, cnt in freqs.items():
+            tmp_list = []
+            skip_next = False
+            for i, val in enumerate(tup):
+                if skip_next:
+                    skip_next = False
+                    continue
+                if i != len(tup) - 1 and val == to_merge[0] and tup[i + 1] == to_merge[1]:
+                    skip_next = True
+                    tmp_list.append(merged_bytes)
+                else:
+                    tmp_list.append(val)
+            freqs2[tuple(tmp_list)] += cnt
+
+        freqs = freqs2
+
+    print("FINAL", vocab, merges)
+    print(len(vocab), len(merges))
+    return vocab, merges
