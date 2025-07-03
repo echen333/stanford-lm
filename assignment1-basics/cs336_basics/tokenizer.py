@@ -9,7 +9,9 @@ class Tokenizer:
         self.vocab = vocab
         self.to_id: dict[bytes, int] = {y: x for x, y in vocab.items()}
         self.merges = merges
-        self.special_tokens = special_tokens
+        self.special_tokens = (
+            list(reversed(sorted(special_tokens, key=lambda x: len(x)))) if special_tokens is not None else None
+        )
         self._compiled = None
 
     @classmethod
@@ -21,12 +23,14 @@ class Tokenizer:
         if not self.special_tokens:
             return [text]
 
-        # pattern = "|".join(map(re.escape, self.special_tokens))
-        pattern = "|".join(self.special_tokens)
+        pattern = "|".join(map(re.escape, self.special_tokens))
+        pat = "(" + "|".join(map(re.escape, self.special_tokens)) + ")"
+
+        # pattern = "|".join(self.special_tokens)
         splitter = self._compiled or re.compile(pattern)
         self._compiled = splitter
 
-        return re.split(pattern, text)
+        return re.split(pat, text)
 
     def encode(self, text: str) -> list[int]:
         """Encode an input text into a sequence of token IDs."""
@@ -35,6 +39,10 @@ class Tokenizer:
         ret = []
 
         for split in self._split_on_special(text):
+            if self.special_tokens is not None and split in self.special_tokens:
+                ret.append(self.to_id[split.encode()])
+                continue
+
             for m in re.finditer(PAT, split):
                 tmp = m.group().encode()
                 tmp2: list[bytes] = [bytes([x]) for x in tmp]
