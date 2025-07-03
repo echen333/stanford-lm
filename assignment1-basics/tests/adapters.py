@@ -562,6 +562,26 @@ def get_tokenizer(
     raise NotImplementedError
 
 
+import regex as re
+from collections import defaultdict
+from multiprocessing import Pool
+
+
+def bpe_get_freqs_per_chunk(input_path, start, end, split_pattern):
+    freqs2: dict[tuple[bytes], int] = defaultdict(int)
+    with open(input_path, "rb") as f:
+        f.seek(start)
+        chunk = f.read(end - start).decode("utf-8", errors="ignore")
+    PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+    for split in re.split(split_pattern, chunk):
+        matches = re.finditer(PAT, split)
+        for m in matches:
+            tmp = m.group().encode()
+            tmp2 = [bytes([x]) for x in tmp]
+            freqs2[tuple(tmp2)] += 1
+    return freqs2
+
+
 def run_train_bpe(
     input_path: str | os.PathLike,
     vocab_size: int,
@@ -589,13 +609,9 @@ def run_train_bpe(
                 representing that <token1> was merged with <token2>.
                 Merges are ordered by order of creation.
     """
-    PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
-    import regex as re
-    from collections import defaultdict
 
     vocab: dict[int, bytes] = {}
     end_of_text_token = "<|endoftext|>"
-
     vocab_cnt = 0
 
     def add_vocab(word: bytes):
@@ -604,19 +620,25 @@ def run_train_bpe(
         vocab_cnt += 1
 
     add_vocab(end_of_text_token.encode())
-    for i in range(1, 257):
-        add_vocab(bytes([i - 1]))
+    for i in range(256):
+        add_vocab(bytes([i]))
 
     freqs: dict[tuple[bytes], int] = defaultdict(int)
     merges: list[tuple[bytes, bytes]] = []
 
-    with open(input_path, "r") as f:  # todo: split across boundaries no
-        for zz in f.read().split(end_of_text_token):
-            matches = re.finditer(PAT, zz)
-            for m in matches:
-                tmp = m.group().encode()
-                tmp2 = [bytes([x]) for x in tmp]
-                freqs[tuple(tmp2)] += 1
+    from cs336_basics.pretokenization_example import find_chunk_boundaries
+
+    split_pattern = "|".join(special_tokens)
+    with open(input_path, "rb") as f:
+        boundaries = find_chunk_boundaries(f, os.cpu_count() // 2, end_of_text_token.encode())
+
+        tasks = [(input_path, s, e, split_pattern) for s, e in zip(boundaries[:-1], boundaries[1:])]
+        with Pool(os.cpu_count()) as pool:
+            partials: list[dict] = pool.starmap(bpe_get_freqs_per_chunk, tasks)
+
+        for chunk_freqs in partials:
+            for x, y in chunk_freqs.items():
+                freqs[x] += y
 
     while vocab_cnt < vocab_size:
         pairs: dict[tuple[bytes, bytes], int] = defaultdict(int)
@@ -625,16 +647,10 @@ def run_train_bpe(
                 pairs[(tup[i], tup[i + 1])] += cnt
 
         # Find max in pairs to merge
-        to_merge: tuple[bytes, bytes] = None
-        to_merge_freq = 0
-        for x, y in pairs.items():
-            if y > to_merge_freq:
-                to_merge_freq = y
-                to_merge = x
-            elif y == to_merge_freq:
-                to_merge = max(to_merge, x)
+        max_freq = max(pairs.values())
+        all_max_freq_pairs = list(filter(lambda x: pairs[x] == max_freq, pairs.keys()))
+        to_merge = max(all_max_freq_pairs)
 
-        # print("to merge", to_merge, to_merge_freq)
         if to_merge is None:
             break
         merged_bytes = to_merge[0] + to_merge[1]
@@ -649,8 +665,7 @@ def run_train_bpe(
             for i, val in enumerate(tup):
                 if skip_next:
                     skip_next = False
-                    continue
-                if i != len(tup) - 1 and val == to_merge[0] and tup[i + 1] == to_merge[1]:
+                elif i != len(tup) - 1 and val == to_merge[0] and tup[i + 1] == to_merge[1]:
                     skip_next = True
                     tmp_list.append(merged_bytes)
                 else:
@@ -659,6 +674,4 @@ def run_train_bpe(
 
         freqs = freqs2
 
-    # print("FINAL", vocab, merges)
-    # print(len(vocab), len(merges))
     return vocab, merges
