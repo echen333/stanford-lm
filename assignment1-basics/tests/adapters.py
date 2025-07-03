@@ -634,7 +634,7 @@ def run_train_bpe(
             elif y == to_merge_freq:
                 to_merge = max(to_merge, x)
 
-        print("to merge", to_merge, to_merge_freq)
+        # print("to merge", to_merge, to_merge_freq)
         if to_merge is None:
             break
         merged_bytes = to_merge[0] + to_merge[1]
@@ -659,6 +659,6 @@ def run_train_bpe(
 
         freqs = freqs2
 
-    print("FINAL", vocab, merges)
-    print(len(vocab), len(merges))
+    # print("FINAL", vocab, merges)
+    # print(len(vocab), len(merges))
     return vocab, merges
