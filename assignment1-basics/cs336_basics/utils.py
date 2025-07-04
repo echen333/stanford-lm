@@ -123,3 +123,18 @@ class RoPE(nn.Module):
         print(ret1.shape)
         ret1 = ret1.flatten(start_dim=-2)
         return ret1
+
+
+def scaled_dot_product(Q, K, V, mask=None):
+    d = Q.shape[-1]
+    dot_prod = einsum(Q, K, "b ... s1 d, b ... s2 d -> b ... s1 s2") * (d**-0.5)
+    if mask is not None:
+        neg_inf_mat = torch.zeros_like(mask) * -float("inf")
+        neg_inf_mat = torch.where(
+            mask,
+            torch.zeros_like(mask),
+            torch.ones_like(mask) * -float("inf"),
+        )
+        dot_prod += neg_inf_mat
+    ret = einsum(softmax(dot_prod, -1), V, "b ... s1 s2, b ... s2 d -> b ... s1 d")
+    return ret
