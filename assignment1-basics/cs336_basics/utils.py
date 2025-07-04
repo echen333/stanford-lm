@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from einops import einsum
+from einops import einsum, rearrange
 
 
 class Linear(nn.Module):
@@ -8,14 +8,14 @@ class Linear(nn.Module):
         """Construct a linear transformation module"""
         super().__init__()
         sigma = 2 / (in_features + out_features) ** 0.5
-        self.W = nn.Parameter(
+        self.weight = nn.Parameter(
             nn.init.trunc_normal_(
                 torch.randn((out_features, in_features), dtype=dtype, device=device) * sigma, a=-3 * sigma, b=3 * sigma
             )
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return einsum(self.W, x, "out in, ... in -> ... out")
+        return einsum(self.weight, x, "out in, ... in -> ... out")
 
 
 class Embedding(nn.Module):
@@ -107,12 +107,9 @@ class RoPE(nn.Module):
         denom = 1.0 / (self.theta ** (torch.arange(0, k, 2).float() / k))
         thetas = einsum(token_positions.float(), denom, "... s, k2 -> ... s k2")
 
-        print("SIZE", thetas.shape, torch.sin(thetas).shape)
-
         cos_t = torch.cos(thetas)
         sin_t = torch.sin(thetas)
 
-        # rot = torch.stack((cos_t, -sin_t, sin_t, cos_t), dim=-1)
         rot_T = torch.stack((cos_t, sin_t, -sin_t, cos_t), dim=-1)
         from einops import rearrange
 
@@ -129,12 +126,39 @@ def scaled_dot_product(Q, K, V, mask=None):
     d = Q.shape[-1]
     dot_prod = einsum(Q, K, "b ... s1 d, b ... s2 d -> b ... s1 s2") * (d**-0.5)
     if mask is not None:
-        neg_inf_mat = torch.zeros_like(mask) * -float("inf")
-        neg_inf_mat = torch.where(
-            mask,
-            torch.zeros_like(mask),
-            torch.ones_like(mask) * -float("inf"),
-        )
-        dot_prod += neg_inf_mat
+        dot_prod = dot_prod.masked_fill(mask == 0, -float("inf"))
+
     ret = einsum(softmax(dot_prod, -1), V, "b ... s1 s2, b ... s2 d -> b ... s1 d")
     return ret
+
+
+class MultiHead_Self_Attention(nn.Module):
+    def __init__(self, d_model, num_heads):
+        super().__init__()
+        self.d_model = d_model
+        self.num_heads = num_heads
+        assert d_model % num_heads == 0
+        self.d_k = d_model // num_heads
+
+        self.Wq = Linear(d_model, d_model)
+        self.Wk = Linear(d_model, d_model)
+        self.Wv = Linear(d_model, d_model)
+        self.Wo = Linear(d_model, d_model)
+
+    def forward(self, x):
+        Q = self.Wq(x)
+        K = self.Wk(x)
+        V = self.Wv(x)
+
+        Q = rearrange(Q, "... seq (h dk) -> h ... seq dk", h=self.num_heads)
+        K = rearrange(K, "... seq (h dk) -> h ... seq dk", h=self.num_heads)
+        V = rearrange(V, "... seq (h dk) -> h ... seq dk", h=self.num_heads)
+
+        seq = Q.shape[-2]
+        mask = ~torch.triu(torch.ones(seq, seq, dtype=torch.bool), diagonal=1)
+
+        ret = scaled_dot_product(Q, K, V, mask=mask)
+        ret = rearrange(ret, "h ... seq dk -> ... seq (h dk)")  # ??
+        ret = self.Wo(ret)
+
+        return ret
