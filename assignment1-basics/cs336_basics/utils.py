@@ -104,24 +104,22 @@ class RoPE(nn.Module):
         Note that you should tolerate x with an arbitrary number of batch dimensions. You should assume that the token positions are a tensor of shape (..., seq_len) specifying the token positions of x along the sequence dimension. You should use the token positions to slice your (possibly precomputed) cos and sin tensors along the sequence dimension."""
 
         k = self.d_k
-        tmp = torch.ones(k // 2) * self.theta
-        # print(tmp, self.theta)
-        denom = 1 / (tmp.pow(torch.arange(1, k // 2 + 1) * 2 / k))
-        # print("denom", denom)
-        thetas = einsum(token_positions, denom, "... s, k2 -> ... s k2")
-        # print("thetas", thetas)
+        denom = 1.0 / (self.theta ** (torch.arange(0, k, 2).float() / k))
+        thetas = einsum(token_positions.float(), denom, "... s, k2 -> ... s k2")
 
         print("SIZE", thetas.shape, torch.sin(thetas).shape)
-        rot = torch.concat((torch.cos(thetas), -torch.sin(thetas), torch.sin(thetas), torch.cos(thetas)), dim=-1)
-        print(rot.shape)
+
+        cos_t = torch.cos(thetas)
+        sin_t = torch.sin(thetas)
+
+        # rot = torch.stack((cos_t, -sin_t, sin_t, cos_t), dim=-1)
+        rot_T = torch.stack((cos_t, sin_t, -sin_t, cos_t), dim=-1)
         from einops import rearrange
 
         tmp_x = rearrange(x, "... s (k2 r1) -> ... s k2 r1", r1=2)
-        rot = rearrange(rot, "... s (k2 r1 r2) -> ... s k2 r1 r2", r1=2, r2=2)
-        print(rot.shape, tmp_x.shape)
+        rot_T = rearrange(rot_T, "... s k2 (r1 r2) -> ... s k2 r1 r2", r1=2, r2=2)
 
-        # ret1 = einsum(tmp_x, rot, "...  s k2 r1, ... s k2 r1 r2 -> ... s k2 r2")
-        ret1 = einsum(tmp_x, rot, "...  s k2 r1, ... s k2 r1 r2 -> ... s k2 r2")
+        ret1 = einsum(tmp_x, rot_T, "...  s k2 r1, ... s k2 r1 r2 -> ... s k2 r2")
         print(ret1.shape)
         ret1 = ret1.flatten(start_dim=-2)
         return ret1
