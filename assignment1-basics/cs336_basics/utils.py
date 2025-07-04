@@ -52,6 +52,13 @@ def silu(x):
     return x * torch.sigmoid(x)
 
 
+def softmax(x, dim):
+    mx = torch.max(x, dim, keepdim=True)[0]
+    tmp_x = x - mx
+    exp_x = torch.exp(tmp_x)
+    return exp_x / torch.sum(exp_x, dim=dim, keepdim=True)
+
+
 class Swiglu(nn.Module):
     def __init__(self, d_model: int, d_ff: int | None = None):
         """composed of a SiLU activation function and a GLU"""
@@ -74,3 +81,47 @@ class Swiglu(nn.Module):
         return einsum(
             self.w2, (einsum(w1xsilu, W3x, "... d_ff, ... d_ff -> ... d_ff")), "d_model d_ff, ... d_ff -> ... d_model"
         )
+
+
+class RoPE(nn.Module):
+    def __init__(self, theta: float, d_k: int, max_seq_len: int, device=None):
+        super().__init__()
+        self.theta = theta
+        assert d_k % 2 == 0
+        self.d_k = d_k
+        self.max_seq_len = max_seq_len
+
+        # If you would like to optimize it, you may use a
+        # single RoPE module referenced by all layers, and it can have a 2d pre-computed buffer of sin and cos values
+        # created during init with self.register_buffer(persistent=False), instead of a nn.Parameter (because
+        # we do not want to learn these fixed cosine and sine values).
+
+        pass
+
+    def forward(self, x: torch.Tensor, token_positions: torch.Tensor) -> torch.Tensor:
+        """Process an input tensor of shape (..., seq_len, d_k) and return a tensor of the same shape.
+
+        Note that you should tolerate x with an arbitrary number of batch dimensions. You should assume that the token positions are a tensor of shape (..., seq_len) specifying the token positions of x along the sequence dimension. You should use the token positions to slice your (possibly precomputed) cos and sin tensors along the sequence dimension."""
+
+        k = self.d_k
+        tmp = torch.ones(k // 2) * self.theta
+        # print(tmp, self.theta)
+        denom = 1 / (tmp.pow(torch.arange(1, k // 2 + 1) * 2 / k))
+        # print("denom", denom)
+        thetas = einsum(token_positions, denom, "... s, k2 -> ... s k2")
+        # print("thetas", thetas)
+
+        print("SIZE", thetas.shape, torch.sin(thetas).shape)
+        rot = torch.concat((torch.cos(thetas), -torch.sin(thetas), torch.sin(thetas), torch.cos(thetas)), dim=-1)
+        print(rot.shape)
+        from einops import rearrange
+
+        tmp_x = rearrange(x, "... s (k2 r1) -> ... s k2 r1", r1=2)
+        rot = rearrange(rot, "... s (k2 r1 r2) -> ... s k2 r1 r2", r1=2, r2=2)
+        print(rot.shape, tmp_x.shape)
+
+        # ret1 = einsum(tmp_x, rot, "...  s k2 r1, ... s k2 r1 r2 -> ... s k2 r2")
+        ret1 = einsum(tmp_x, rot, "...  s k2 r1, ... s k2 r1 r2 -> ... s k2 r2")
+        print(ret1.shape)
+        ret1 = ret1.flatten(start_dim=-2)
+        return ret1
