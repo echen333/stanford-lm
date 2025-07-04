@@ -162,3 +162,23 @@ class MultiHead_Self_Attention(nn.Module):
         ret = self.Wo(ret)
 
         return ret
+
+
+class TransformerBlock(nn.Module):
+    def __init__(self, d_model, num_heads, d_ff):
+        super().__init__()
+
+        self.rms_norm = RMSNorm(d_model)
+        self.rms_norm2 = RMSNorm(d_model)
+        self.multi_head = MultiHead_Self_Attention(d_model, num_heads)
+        self.mlp1 = Linear(d_model, d_ff)
+        self.mlp2 = Linear(d_ff, d_model)
+
+    def forward(self, x):
+        # TODO: ROPE
+        rms = self.rms_norm(x)
+        y = x + self.multi_head(rms)
+        rms2 = self.rms_norm2(rms)
+        y2 = self.mlp2(self.mlp1(rms2))
+
+        return y + y2
