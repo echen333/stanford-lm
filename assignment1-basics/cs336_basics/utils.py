@@ -34,7 +34,7 @@ class RMSNorm(nn.Module):
         super().__init__()
         self.eps = eps
         self.d_model = d_model
-        self.g = nn.Parameter(torch.ones(d_model, device=device, dtype=dtype))
+        self.weight = nn.Parameter(torch.ones(d_model, device=device, dtype=dtype))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Process an input tensor of shape (batch_size, sequence_length, d_model) and return a tensor of the same shape."""
@@ -43,7 +43,7 @@ class RMSNorm(nn.Module):
 
         RMS = torch.sqrt(torch.sum(torch.square(x), dim=-1) / self.d_model + self.eps)
 
-        result = einsum(x, self.g, "... d, d -> ... d") / torch.unsqueeze(RMS, dim=-1)
+        result = einsum(x, self.weight, "... d, d -> ... d") / torch.unsqueeze(RMS, dim=-1)
 
         return result.to(in_dtype)
 
@@ -66,21 +66,16 @@ class Swiglu(nn.Module):
         if d_ff is None:
             d_ff = d_model * 8 // 3
             d_ff = (d_ff // 64) * 64
-        sigma = (2 / (d_model + d_ff)) ** 0.5
-        self.w1 = nn.Parameter(nn.init.trunc_normal_(torch.randn((d_ff, d_model)) * sigma, a=-3 * sigma, b=3 * sigma))
-        self.w2 = nn.Parameter(nn.init.trunc_normal_(torch.randn((d_model, d_ff)) * sigma, a=-3 * sigma, b=3 * sigma))
-        self.w3 = nn.Parameter(nn.init.trunc_normal_(torch.randn((d_ff, d_model)) * sigma, a=-3 * sigma, b=3 * sigma))
+        self.w1 = Linear(d_model, d_ff)
+        self.w2 = Linear(d_ff, d_model)
+        self.w3 = Linear(d_model, d_ff)
 
     def forward(self, x):
-        W1x = einsum(self.w1, x, "d_ff d_model, ... d_model -> ... d_ff")
-        W3x = einsum(self.w3, x, "d_ff d_model, ... d_model -> ... d_ff")
-        print(x.shape, self.w1.shape, W1x.shape)
+        W1x = self.w1(x)
+        W3x = self.w3(x)
         w1xsilu = silu(W1x)
 
-        # to fix: a mess and slow
-        return einsum(
-            self.w2, (einsum(w1xsilu, W3x, "... d_ff, ... d_ff -> ... d_ff")), "d_model d_ff, ... d_ff -> ... d_model"
-        )
+        return self.w2(einsum(w1xsilu, W3x, "... d_ff, ... d_ff -> ... d_ff"))
 
 
 class RoPE(nn.Module):
@@ -133,52 +128,58 @@ def scaled_dot_product(Q, K, V, mask=None):
 
 
 class MultiHead_Self_Attention(nn.Module):
-    def __init__(self, d_model, num_heads):
+    def __init__(self, d_model, num_heads, theta=None, max_seq_len=None):
         super().__init__()
         self.d_model = d_model
         self.num_heads = num_heads
         assert d_model % num_heads == 0
         self.d_k = d_model // num_heads
 
-        self.Wq = Linear(d_model, d_model)
-        self.Wk = Linear(d_model, d_model)
-        self.Wv = Linear(d_model, d_model)
-        self.Wo = Linear(d_model, d_model)
+        self.q_proj = Linear(d_model, d_model)
+        self.k_proj = Linear(d_model, d_model)
+        self.v_proj = Linear(d_model, d_model)
+        self.output_proj = Linear(d_model, d_model)
 
-    def forward(self, x):
-        Q = self.Wq(x)
-        K = self.Wk(x)
-        V = self.Wv(x)
+        self.rope = None
+        if theta is not None and max_seq_len is not None:
+            self.rope = RoPE(theta, self.d_k, max_seq_len=None)
+
+    def forward(self, x, token_positions=None):
+        Q = self.q_proj(x)
+        K = self.k_proj(x)
+        V = self.v_proj(x)
 
         Q = rearrange(Q, "... seq (h dk) -> h ... seq dk", h=self.num_heads)
         K = rearrange(K, "... seq (h dk) -> h ... seq dk", h=self.num_heads)
         V = rearrange(V, "... seq (h dk) -> h ... seq dk", h=self.num_heads)
+
+        if self.rope is not None and token_positions is not None:
+            Q = self.rope(Q, token_positions)
+            K = self.rope(K, token_positions)
 
         seq = Q.shape[-2]
         mask = ~torch.triu(torch.ones(seq, seq, dtype=torch.bool), diagonal=1)
 
         ret = scaled_dot_product(Q, K, V, mask=mask)
         ret = rearrange(ret, "h ... seq dk -> ... seq (h dk)")  # ??
-        ret = self.Wo(ret)
+        ret = self.output_proj(ret)
 
         return ret
 
 
 class TransformerBlock(nn.Module):
-    def __init__(self, d_model, num_heads, d_ff):
+    def __init__(self, d_model, num_heads, d_ff, theta=None, max_seq_len=None):
         super().__init__()
 
-        self.rms_norm = RMSNorm(d_model)
-        self.rms_norm2 = RMSNorm(d_model)
-        self.multi_head = MultiHead_Self_Attention(d_model, num_heads)
-        self.mlp1 = Linear(d_model, d_ff)
-        self.mlp2 = Linear(d_ff, d_model)
+        self.ln1 = RMSNorm(d_model)
+        self.ln2 = RMSNorm(d_model)
+        self.attn = MultiHead_Self_Attention(d_model, num_heads, theta, max_seq_len)
+        self.ffn = Swiglu(d_model, d_ff)
 
     def forward(self, x):
-        # TODO: ROPE
-        rms = self.rms_norm(x)
-        y = x + self.multi_head(rms)
-        rms2 = self.rms_norm2(rms)
-        y2 = self.mlp2(self.mlp1(rms2))
+        rms = self.ln1(x)
+        y = x + self.attn(rms)
+        rms2 = self.ln2(y)
+        y2 = self.ffn(rms2)
 
         return y + y2
