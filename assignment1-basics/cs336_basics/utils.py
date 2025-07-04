@@ -46,3 +46,31 @@ class RMSNorm(nn.Module):
         result = einsum(x, self.g, "... d, d -> ... d") / torch.unsqueeze(RMS, dim=-1)
 
         return result.to(in_dtype)
+
+
+def silu(x):
+    return x * torch.sigmoid(x)
+
+
+class Swiglu(nn.Module):
+    def __init__(self, d_model: int, d_ff: int | None = None):
+        """composed of a SiLU activation function and a GLU"""
+        super().__init__()
+        if d_ff is None:
+            d_ff = d_model * 8 // 3
+            d_ff = (d_ff // 64) * 64
+        sigma = (2 / (d_model + d_ff)) ** 0.5
+        self.w1 = nn.Parameter(nn.init.trunc_normal_(torch.randn((d_ff, d_model)) * sigma, a=-3 * sigma, b=3 * sigma))
+        self.w2 = nn.Parameter(nn.init.trunc_normal_(torch.randn((d_model, d_ff)) * sigma, a=-3 * sigma, b=3 * sigma))
+        self.w3 = nn.Parameter(nn.init.trunc_normal_(torch.randn((d_ff, d_model)) * sigma, a=-3 * sigma, b=3 * sigma))
+
+    def forward(self, x):
+        W1x = einsum(self.w1, x, "d_ff d_model, ... d_model -> ... d_ff")
+        W3x = einsum(self.w3, x, "d_ff d_model, ... d_model -> ... d_ff")
+        print(x.shape, self.w1.shape, W1x.shape)
+        w1xsilu = silu(W1x)
+
+        # to fix: a mess and slow
+        return einsum(
+            self.w2, (einsum(w1xsilu, W3x, "... d_ff, ... d_ff -> ... d_ff")), "d_model d_ff, ... d_ff -> ... d_model"
+        )
