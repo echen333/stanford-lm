@@ -21,12 +21,12 @@ class Linear(nn.Module):
 class Embedding(nn.Module):
     def __init__(self, num_embeddings, embedding_dim, device=None, dtype=None):
         super().__init__()
-        self.emb = nn.Parameter(
+        self.weight = nn.Parameter(
             nn.init.trunc_normal_(torch.randn(num_embeddings, embedding_dim, device=device, dtype=dtype), a=-3, b=3)
         )
 
     def forward(self, token_ids: torch.Tensor) -> torch.Tensor:
-        return self.emb[token_ids]
+        return self.weight[token_ids]
 
 
 class RMSNorm(nn.Module):
@@ -74,24 +74,22 @@ class Swiglu(nn.Module):
         W1x = self.w1(x)
         W3x = self.w3(x)
         w1xsilu = silu(W1x)
-
-        return self.w2(einsum(w1xsilu, W3x, "... d_ff, ... d_ff -> ... d_ff"))
+        return self.w2(w1xsilu * W3x)
 
 
 class RoPE(nn.Module):
     def __init__(self, theta: float, d_k: int, max_seq_len: int, device=None):
+        """
+        If you would like to optimize it, you may use a
+        single RoPE module referenced by all layers, and it can have a 2d pre-computed buffer of sin and cos values
+        created during init with self.register_buffer(persistent=False), instead of a nn.Parameter (because
+        we do not want to learn these fixed cosine and sine values).
+        """
         super().__init__()
         self.theta = theta
         assert d_k % 2 == 0
         self.d_k = d_k
         self.max_seq_len = max_seq_len
-
-        # If you would like to optimize it, you may use a
-        # single RoPE module referenced by all layers, and it can have a 2d pre-computed buffer of sin and cos values
-        # created during init with self.register_buffer(persistent=False), instead of a nn.Parameter (because
-        # we do not want to learn these fixed cosine and sine values).
-
-        pass
 
     def forward(self, x: torch.Tensor, token_positions: torch.Tensor) -> torch.Tensor:
         """Process an input tensor of shape (..., seq_len, d_k) and return a tensor of the same shape.
@@ -112,7 +110,6 @@ class RoPE(nn.Module):
         rot_T = rearrange(rot_T, "... s k2 (r1 r2) -> ... s k2 r1 r2", r1=2, r2=2)
 
         ret1 = einsum(tmp_x, rot_T, "...  s k2 r1, ... s k2 r1 r2 -> ... s k2 r2")
-        print(ret1.shape)
         ret1 = ret1.flatten(start_dim=-2)
         return ret1
 
@@ -130,9 +127,8 @@ def scaled_dot_product(Q, K, V, mask=None):
 class MultiHead_Self_Attention(nn.Module):
     def __init__(self, d_model, num_heads, theta=None, max_seq_len=None):
         super().__init__()
-        self.d_model = d_model
-        self.num_heads = num_heads
         assert d_model % num_heads == 0
+        self.num_heads = num_heads
         self.d_k = d_model // num_heads
 
         self.q_proj = Linear(d_model, d_model)
@@ -142,16 +138,16 @@ class MultiHead_Self_Attention(nn.Module):
 
         self.rope = None
         if theta is not None and max_seq_len is not None:
-            self.rope = RoPE(theta, self.d_k, max_seq_len=None)
+            self.rope = RoPE(theta, self.d_k, max_seq_len)
 
     def forward(self, x, token_positions=None):
         Q = self.q_proj(x)
         K = self.k_proj(x)
         V = self.v_proj(x)
 
-        Q = rearrange(Q, "... seq (h dk) -> h ... seq dk", h=self.num_heads)
-        K = rearrange(K, "... seq (h dk) -> h ... seq dk", h=self.num_heads)
-        V = rearrange(V, "... seq (h dk) -> h ... seq dk", h=self.num_heads)
+        Q = rearrange(Q, "... seq (h dk) -> ... h seq dk", h=self.num_heads)
+        K = rearrange(K, "... seq (h dk) -> ... h seq dk", h=self.num_heads)
+        V = rearrange(V, "... seq (h dk) -> ... h seq dk", h=self.num_heads)
 
         if self.rope is not None and token_positions is not None:
             Q = self.rope(Q, token_positions)
@@ -159,9 +155,8 @@ class MultiHead_Self_Attention(nn.Module):
 
         seq = Q.shape[-2]
         mask = ~torch.triu(torch.ones(seq, seq, dtype=torch.bool), diagonal=1)
-
         ret = scaled_dot_product(Q, K, V, mask=mask)
-        ret = rearrange(ret, "h ... seq dk -> ... seq (h dk)")  # ??
+        ret = rearrange(ret, "... h seq dk -> ... seq (h dk)")  # ??
         ret = self.output_proj(ret)
 
         return ret
@@ -177,9 +172,29 @@ class TransformerBlock(nn.Module):
         self.ffn = Swiglu(d_model, d_ff)
 
     def forward(self, x):
+        _, seq_len, _ = x.shape
         rms = self.ln1(x)
-        y = x + self.attn(rms)
+        y = x + self.attn(rms, torch.arange(0, seq_len))
         rms2 = self.ln2(y)
         y2 = self.ffn(rms2)
 
         return y + y2
+
+
+class Transformer(nn.Module):
+    def __init__(self, vocab_size, d_model, num_heads, d_ff, rope_theta, context_length, num_layers, device=None):
+        super().__init__()
+        self.token_embeddings = Embedding(vocab_size, d_model, device=device)
+        self.layers = nn.ModuleList(
+            [TransformerBlock(d_model, num_heads, d_ff, rope_theta, context_length) for _ in range(num_layers)]
+        )
+        self.ln_final = RMSNorm(d_model, device=device)
+        self.lm_head = Linear(d_model, vocab_size)
+
+    def forward(self, x):
+        out = self.token_embeddings(x)
+        for layer in self.layers:
+            out = layer(out)
+        out = self.ln_final(out)
+        probs = self.lm_head(out)
+        return probs
