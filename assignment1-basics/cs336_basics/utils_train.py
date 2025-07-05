@@ -60,3 +60,28 @@ def clip_gradients(params, max_l2_norm, eps=1e-6):
         for param in params:
             if param.grad is not None:
                 param.grad = param.grad * (max_l2_norm / (total_norm + eps))
+
+
+def get_batch(dataset, batch_size, context_length, device):
+    start_idxs = torch.randint(0, len(dataset) - context_length, tuple([batch_size]))
+    all_idxs = start_idxs.reshape(-1, 1) + torch.arange(0, context_length)
+    all_idxs.to(device)
+    ret = torch.tensor(dataset[all_idxs.reshape(-1, 1) + 1].reshape(batch_size, -1), device=device)
+    return (all_idxs, ret)
+
+
+import os
+import typing
+
+
+def save_checkpoint(model, optimizer, iteration, out: str | os.PathLike | typing.BinaryIO | typing.IO[bytes]):
+    model_dict = model.state_dict()
+    optim_dict = optimizer.state_dict()
+    torch.save({"model": model_dict, "optim": optim_dict, "iteration": iteration}, out)
+
+
+def load_checkpoint(src, model, optimizer):
+    saved_dict = torch.load(src)
+    model.load_state_dict(saved_dict["model"])
+    optimizer.load_state_dict(saved_dict["optim"])
+    return saved_dict["iteration"]
