@@ -82,7 +82,7 @@ def test_gradient_clipping():
 
     for t1_grad, t1_c_grad in zip(t1_grads, t1_c_grads):
         numpy.testing.assert_allclose(
-            t1_grad.detach().numpy(),
             t1_c_grad.detach().numpy(),
+            t1_grad.detach().numpy(),  # i flipped
             atol=1e-6,
         )

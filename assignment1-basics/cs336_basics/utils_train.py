@@ -41,3 +41,22 @@ class AdamW(optim.Optimizer):
                 p.data -= alpha * group["weight_decay"] * p.data
                 state["t"] = t + 1
         return loss
+
+
+def get_lr_cosine_schedule(t, a_max, a_min, T_w, T_c):
+    if t < T_w:
+        return t / T_w * a_max
+    elif t > T_c:
+        return a_min
+    return a_min + (1 + math.cos((t - T_w) / (T_c - T_w) * math.pi)) * (a_max - a_min) / 2
+
+
+def clip_gradients(params, max_l2_norm, eps=1e-6):
+    total_norm = torch.sqrt(
+        sum(torch.norm(param.grad, 2) ** 2 for param in params if param.grad is not None and param.requires_grad)
+    )
+
+    if total_norm > max_l2_norm:
+        for param in params:
+            if param.grad is not None:
+                param.grad = param.grad * (max_l2_norm / (total_norm + eps))
