@@ -48,6 +48,7 @@ def find_chunk_boundaries(file: BinaryIO, desired_num_chunks: int, split_special
 if __name__ == "__main__":
     ## Usage
     with open(..., "rb") as f:
+        num_processes = 1
         boundaries = find_chunk_boundaries(f, num_processes, "<|endoftext|>".encode("utf-8"))
 
         # The following is a serial implementation, but you can parallelize this
