@@ -109,10 +109,21 @@ class Tokenizer:
         self._compiled = None
 
     @classmethod
-    def from_files(cls, vocab_filepath: str, merges_filepath: str, special_tokens=None):
+    def from_files(cls, vocab_filepath: str, merges_filepath: str, special_tokens=None, encoding: str = "latin-1"):
         """Class method that constructs and return a Tokenizer from a serialized vocabulary and list of merges (in the same format that your BPE training code output) and (optionally) a list of special tokens"""
-        # with open(vocab_filepath, "r") as f:
-        pass
+
+        # shouldve just used pkl here...
+        vocab_str = Path(vocab_filepath).read_text()
+        raw_tok2id = json.loads(vocab_str)
+        vocab: dict[int, bytes] = {
+            int(idx): base64.b64decode(token.encode("ascii")) for idx, token in raw_tok2id.items()
+        }
+
+        assert os.path.splitext(merges_filepath)[1] == ".pkl"
+        with open(merges_filepath, "rb") as f:
+            merges = pkl.load(f)
+
+        return cls(vocab, merges, special_tokens)
 
     def _split_on_special(self, text: str) -> list[str]:
         if not self.special_tokens:
@@ -173,26 +184,30 @@ class Tokenizer:
 
 
 from pathlib import Path
-import json
+import json, base64
+import pickle as pkl
 
 
-def save_bpe_state(vocab, merges, vocab_json_path, merges_txt_path):
-    vocab_json_path = Path(vocab_json_path)
-    vocab_json_path.write_text(json.dumps(vocab, ensure_ascii=False, indent=2))
-    pass
+def save_bpe_state(vocab: dict[int, bytes], merges, vocab_json_path, merges_path, encoding: str = "latin-1"):
+    safe_vocab = {idx: base64.b64encode(b).decode("ascii") for idx, b in vocab.items()}
+    Path(vocab_json_path).write_text(json.dumps(safe_vocab, ensure_ascii=False))
+
+    with open(merges_path, "wb") as f:
+        pkl.dump(merges, f)
 
 
 if __name__ == "__main__":
-    input_path = "data/TinyStoriesV2-GPT4-train.txt"
-    vocab_size = 100
+    # input_path = "data/TinyStoriesV2-GPT4-train.txt"
+    input_path = "data/TinyStoriesV2-GPT4-valid.txt"
+    vocab_size = 300
     end_of_text_token = "<|endoftext|>"
     special_tokens = [end_of_text_token]
-    print("HIHI")
     vocab, merges = train_bpe(input_path, vocab_size, special_tokens)
-    print("vocab", vocab)
-    print("merges", merges)
-    save_bpe_state(vocab, merges, "data/tiny_stories_vocab.json", "data/tiny_stories_merges.txt")
 
-    # with open(data_path, "r") as f:
+    vocab_json_path = "data/tiny_stories_vocab.json"
+    merges_txt_path = "data/tiny_stories_merges.pkl"
+    save_bpe_state(vocab, merges, vocab_json_path, merges_txt_path)
 
-    # tokenizer = Tokenizer()
+    tokenizer: Tokenizer = Tokenizer.from_files(vocab_json_path, merges_txt_path, special_tokens)
+    print(tokenizer.vocab)
+    print(tokenizer.merges)

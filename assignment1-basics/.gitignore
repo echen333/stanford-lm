@@ -1,4 +1,6 @@
 data/
+outputs/**
+!outputs/**/canonical/**
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
