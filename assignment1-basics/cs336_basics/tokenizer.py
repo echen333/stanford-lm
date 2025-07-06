@@ -196,16 +196,26 @@ def save_bpe_state(vocab: dict[int, bytes], merges, vocab_json_path, merges_path
         pkl.dump(merges, f)
 
 
+def encode_text_to_npy(data_path, path_prefix: str, special_tokens=None):
+    vocab_path = path_prefix + "_vocab.json"
+    merges_path = path_prefix + "_merges.pkl"
+    tokenizer = Tokenizer.from_files(vocab_path, merges_path, special_tokens)
+
+    # am i pretokenizing or what idk
+    pass
+
+
 if __name__ == "__main__":
-    # input_path = "data/TinyStoriesV2-GPT4-train.txt"
-    input_path = "data/TinyStoriesV2-GPT4-valid.txt"
-    vocab_size = 300
+    input_path = "data/TinyStoriesV2-GPT4-train.txt"
+    # input_path = "data/TinyStoriesV2-GPT4-valid.txt"
+    vocab_size = 10000
     end_of_text_token = "<|endoftext|>"
     special_tokens = [end_of_text_token]
     vocab, merges = train_bpe(input_path, vocab_size, special_tokens)
+    print("found vocab and merges")
 
-    vocab_json_path = "data/tiny_stories_vocab.json"
-    merges_txt_path = "data/tiny_stories_merges.pkl"
+    vocab_json_path = f"data/tiny_stories_{vocab_size}_vocab.json"
+    merges_txt_path = f"data/tiny_stories_{vocab_size}_merges.pkl"
     save_bpe_state(vocab, merges, vocab_json_path, merges_txt_path)
 
     tokenizer: Tokenizer = Tokenizer.from_files(vocab_json_path, merges_txt_path, special_tokens)
