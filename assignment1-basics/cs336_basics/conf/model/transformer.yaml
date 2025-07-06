@@ -1,0 +1,9 @@
+_target_: utils.Transformer
+vocab_size: 50_000
+d_model: 768
+num_heads: 12
+d_ff: 3072
+rope_theta: 10_000
+context_length: 4096
+num_layers: 24
+device: cpu

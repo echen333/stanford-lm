@@ -15,6 +15,7 @@ def cross_entropy(inputs: Tensor, targets: Tensor):
 import torch.optim as optim
 from typing import Optional, Callable
 import math
+import numpy.typing as npt
 
 
 class AdamW(optim.Optimizer):
@@ -62,7 +63,7 @@ def clip_gradients(params, max_l2_norm, eps=1e-6):
                 param.grad = param.grad * (max_l2_norm / (total_norm + eps))
 
 
-def get_batch(dataset, batch_size, context_length, device):
+def get_batch(dataset: npt.NDArray, batch_size: int, context_length: int, device: str):
     start_idxs = torch.randint(0, len(dataset) - context_length, tuple([batch_size]))
     all_idxs = start_idxs.reshape(-1, 1) + torch.arange(0, context_length)
     all_idxs.to(device)
