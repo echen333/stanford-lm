@@ -266,19 +266,19 @@ def encode_text_to_npy(data_path, path_prefix: str, special_tokens=None):
 
 
 def main():
-    # input_path = "data/owt_train.txt"
-    # prefix_path = "data/owt_train"
+    input_path = "data/owt_train.txt"
+    prefix_path = "data/owt_train"
     # input_path = "data/owt_valid.txt"
     # prefix_path = "data/owt_valid"
-    input_path = "data/TinyStoriesV2-GPT4-train.txt"
-    prefix_path = "data/tiny_stories_train_testing"
+    # input_path = "data/TinyStoriesV2-GPT4-train.txt"
+    # prefix_path = "data/tiny_stories_train_testing"
     # input_path = "data/TinyStoriesV2-GPT4-valid.txt"
     # prefix_path = "data/tiny_stories_train_testing"
 
     vocab_size = 32000 if "owt_train" in input_path else 10000
     end_of_text_token = "<|endoftext|>"
     special_tokens = [end_of_text_token]
-    print(f"Training bpe on path {input_path}")
+    print(f"Training bpe on path {input_path} with vocab_size {vocab_size}")
     vocab, merges = train_bpe(input_path, vocab_size, special_tokens)
     print("found vocab and merges")
 
