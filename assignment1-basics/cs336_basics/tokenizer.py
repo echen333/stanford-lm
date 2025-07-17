@@ -90,68 +90,66 @@ def train_bpe(
     num_deleted = 0
     num_all_keys = len(all_keys)
 
-    while vocab_cnt < vocab_size:
-        # Find max in pairs to merge
-        max_freq = max(pairs.values())
-        all_max_freq_pairs = list(filter(lambda x: pairs[x] == max_freq, pairs.keys()))
-        to_merge = max(all_max_freq_pairs)
+    # Create pool once and reuse it - this eliminates the overhead of creating pools every iteration
+    with ctx.Pool(n_procs) as pool:
+        while vocab_cnt < vocab_size:
+            to_merge = max(pairs.items(), key=lambda x: (x[1], x[0]))[0]
 
-        if to_merge is None:
-            break
-        merged_bytes = to_merge[0] + to_merge[1]
-        add_vocab(merged_bytes)
-        merges.append(to_merge)
+            if to_merge is None:
+                break
+            merged_bytes = to_merge[0] + to_merge[1]
+            add_vocab(merged_bytes)
+            merges.append(to_merge)
 
-        # Update freqs by merging old
-        tups_with_merged = []
-        chunks = [all_keys[i::n_procs] for i in range(n_procs)]
+            # Update freqs by merging old
+            tups_with_merged = []
+            chunks = [all_keys[i::n_procs] for i in range(n_procs)]
 
-        with ctx.Pool(n_procs) as pool:
             partials = pool.starmap(find_tups, zip(chunks, repeat(to_merge)))
-        # partials = [find_tups(chunks[0], to_merge)] # if n_procs is 1
+            # partials = [find_tups(chunks[0], to_merge)] # if n_procs is 1
 
-        for partial in partials:
-            tups_with_merged.extend(partial)
+            for partial in partials:
+                tups_with_merged.extend(partial)
 
-        to_delete: list[tup] = []
-        to_upd: dict[tuple[bytes], int] = defaultdict(int)
-        for tup in tups_with_merged:
-            cnt = freqs[tup]
-            new_list = []
-            skip_next = False
-            for i, val in enumerate(tup):
-                if skip_next:
-                    skip_next = False
-                elif i != len(tup) - 1 and val == to_merge[0] and tup[i + 1] == to_merge[1]:
-                    skip_next = True
-                    new_list.append(merged_bytes)
-                else:
-                    new_list.append(val)
+            to_delete: list[tup] = []
+            to_upd: dict[tuple[bytes], int] = defaultdict(int)
+            for tup in tups_with_merged:
+                cnt = freqs[tup]
+                new_list = []
+                skip_next = False
+                for i, val in enumerate(tup):
+                    if skip_next:
+                        skip_next = False
+                    elif i != len(tup) - 1 and val == to_merge[0] and tup[i + 1] == to_merge[1]:
+                        skip_next = True
+                        new_list.append(merged_bytes)
+                    else:
+                        new_list.append(val)
 
-            for i in range(len(tup) - 1):
-                pairs[(tup[i], tup[i + 1])] -= cnt
-            for i in range(len(new_list) - 1):
-                pairs[(new_list[i], new_list[i + 1])] += cnt
+                for i in range(len(tup) - 1):
+                    pairs[(tup[i], tup[i + 1])] -= cnt
+                for i in range(len(new_list) - 1):
+                    pairs[(new_list[i], new_list[i + 1])] += cnt
 
-            to_upd[tuple(new_list)] = cnt
-            to_delete.append(tup)
+                to_upd[tuple(new_list)] = cnt
+                to_delete.append(tup)
 
-        for tup in to_delete:
-            del freqs[tup]
-        num_deleted += len(to_delete)
+            for tup in to_delete:
+                del freqs[tup]
+            num_deleted += len(to_delete)
 
-        for tup, cnt in to_upd.items():
-            freqs[tup] += cnt
-            all_keys.append(tup)
+            for tup, cnt in to_upd.items():
+                freqs[tup] += cnt
+                all_keys.append(tup)
 
-        del pairs[(to_merge[0], to_merge[1])]
+            del pairs[(to_merge[0], to_merge[1])]
 
-        if int(3 * num_deleted) > num_all_keys:
-            print("RESET all_keys")
-            num_deleted = 0
-            all_keys = list(freqs.keys())
-        if vocab_cnt % (vocab_size // 25) == 0:
-            print(f"Have {vocab_cnt} tokens in vocab now")
+            if int(3 * num_deleted) > num_all_keys:
+                print("RESET all_keys")
+                num_deleted = 0
+                all_keys = list(freqs.keys())
+            if vocab_cnt % (vocab_size // 25) == 0:
+                print(f"Have {vocab_cnt} tokens in vocab now")
 
     return vocab, merges
 
