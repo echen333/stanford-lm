@@ -60,7 +60,7 @@ def run_embedding(
     from cs336_basics.utils import Embedding
 
     embedding = Embedding(vocab_size, d_model)
-    embedding.load_state_dict({"emb": weights})
+    embedding.load_state_dict({"weight": weights})
 
     return embedding(token_ids)
 
@@ -240,10 +240,6 @@ def run_rope(
     Returns:
         Float[Tensor, " ... sequence_length d_k"]: Tensor with RoPEd input.
     """
-    print(token_positions.shape, in_query_or_key.shape)
-    print(token_positions)
-    print("Q", in_query_or_key)
-
     from cs336_basics.utils import RoPE
 
     rope = RoPE(theta, d_k, max_seq_len)

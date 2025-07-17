@@ -2,6 +2,7 @@ from typing import Iterable, Iterator
 import regex as re
 import os
 from collections import defaultdict
+import cProfile
 
 
 import regex as re
@@ -49,7 +50,7 @@ def train_bpe(
 
     split_pattern = "|".join(special_tokens)
     with open(input_path, "rb") as f:
-        boundaries = find_chunk_boundaries(f, os.cpu_count() // 2, end_of_text_token.encode())
+        boundaries = find_chunk_boundaries(f, os.cpu_count(), end_of_text_token.encode())
 
         tasks = [(input_path, s, e, split_pattern) for s, e in zip(boundaries[:-1], boundaries[1:])]
         with Pool(os.cpu_count()) as pool:
@@ -59,12 +60,13 @@ def train_bpe(
             for x, y in chunk_freqs.items():
                 freqs[x] += y
 
-    while vocab_cnt < vocab_size:
-        pairs: dict[tuple[bytes, bytes], int] = defaultdict(int)
-        for tup, cnt in freqs.items():
-            for i in range(len(tup) - 1):
-                pairs[(tup[i], tup[i + 1])] += cnt
+    print("Finished pretokenizing")
+    pairs: dict[tuple[bytes, bytes], int] = defaultdict(int)
+    for tup, cnt in freqs.items():
+        for i in range(len(tup) - 1):
+            pairs[(tup[i], tup[i + 1])] += cnt
 
+    while vocab_cnt < vocab_size:
         # Find max in pairs to merge
         max_freq = max(pairs.values())
         all_max_freq_pairs = list(filter(lambda x: pairs[x] == max_freq, pairs.keys()))
@@ -77,26 +79,52 @@ def train_bpe(
         merges.append(to_merge)
 
         # Update freqs by merging old
-        freqs2 = defaultdict(int)
+        to_delete: list[tup] = []
+        to_upd: dict[tuple[bytes], int] = defaultdict(int)
         for tup, cnt in freqs.items():
-            tmp_list = []
+            flag = False
+            for i, val in enumerate(tup):
+                if val == to_merge[0] and i != len(tup) - 1 and tup[i + 1] == to_merge[1]:
+                    flag = True
+            if not flag:
+                continue
+
+            new_list = []
             skip_next = False
             for i, val in enumerate(tup):
                 if skip_next:
                     skip_next = False
                 elif i != len(tup) - 1 and val == to_merge[0] and tup[i + 1] == to_merge[1]:
                     skip_next = True
-                    tmp_list.append(merged_bytes)
+                    new_list.append(merged_bytes)
                 else:
-                    tmp_list.append(val)
-            freqs2[tuple(tmp_list)] += cnt
+                    new_list.append(val)
 
-        freqs = freqs2
+            for i in range(len(tup) - 1):
+                pairs[(tup[i], tup[i + 1])] -= cnt
+            for i in range(len(new_list) - 1):
+                pairs[(new_list[i], new_list[i + 1])] += cnt
+
+            to_upd[tuple(new_list)] = cnt
+            to_delete.append(tup)
+
+        for tup in to_delete:
+            del freqs[tup]
+
+        for tup, cnt in to_upd.items():
+            freqs[tup] += cnt
+
+        del pairs[(to_merge[0], to_merge[1])]
+
+        if vocab_cnt % (vocab_size // 25) == 0:
+            print(f"Have {vocab_cnt} tokens in vocab now")
 
     return vocab, merges
 
 
 class Tokenizer:
+    """Given vocab and merges after training BPE, encode and decode bytes."""
+
     def __init__(
         self, vocab: dict[int, bytes], merges: list[tuple[bytes, bytes]], special_tokens: list[str] | None = None
     ):
@@ -205,19 +233,32 @@ def encode_text_to_npy(data_path, path_prefix: str, special_tokens=None):
     pass
 
 
-if __name__ == "__main__":
-    input_path = "data/TinyStoriesV2-GPT4-train.txt"
+def main():
+    # input_path = "data/owt_train.txt"
+    # prefix_path = "data/owt_train"
+    input_path = "data/owt_valid.txt"
+    prefix_path = "data/owt_valid"
+    # input_path = "data/TinyStoriesV2-GPT4-train.txt"
+    # prefix_path = "data/tiny_stories_train"
     # input_path = "data/TinyStoriesV2-GPT4-valid.txt"
+    # prefix_path = "data/tiny_stories_val"
+
     vocab_size = 10000
     end_of_text_token = "<|endoftext|>"
     special_tokens = [end_of_text_token]
+    print(f"Training bpe on path {input_path}")
     vocab, merges = train_bpe(input_path, vocab_size, special_tokens)
     print("found vocab and merges")
 
-    vocab_json_path = f"data/tiny_stories_{vocab_size}_vocab.json"
-    merges_txt_path = f"data/tiny_stories_{vocab_size}_merges.pkl"
+    vocab_json_path = f"{prefix_path}_{vocab_size}_vocab.json"
+    merges_txt_path = f"{prefix_path}_{vocab_size}_merges.pkl"
     save_bpe_state(vocab, merges, vocab_json_path, merges_txt_path)
 
     tokenizer: Tokenizer = Tokenizer.from_files(vocab_json_path, merges_txt_path, special_tokens)
     print(tokenizer.vocab)
     print(tokenizer.merges)
+
+
+if __name__ == "__main__":
+    # cProfile.run("main()")
+    main()
