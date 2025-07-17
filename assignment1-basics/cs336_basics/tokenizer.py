@@ -145,7 +145,7 @@ def train_bpe(
             del pairs[(to_merge[0], to_merge[1])]
 
             if int(3 * num_deleted) > num_all_keys:
-                print("RESET all_keys")
+                # print("RESET all_keys")
                 num_deleted = 0
                 all_keys = list(freqs.keys())
             if vocab_cnt % (vocab_size // 25) == 0:
@@ -270,12 +270,12 @@ def main():
     # prefix_path = "data/owt_train"
     # input_path = "data/owt_valid.txt"
     # prefix_path = "data/owt_valid"
-    # input_path = "data/TinyStoriesV2-GPT4-train.txt"
-    # prefix_path = "data/tiny_stories_train_testing"
-    input_path = "data/TinyStoriesV2-GPT4-valid.txt"
+    input_path = "data/TinyStoriesV2-GPT4-train.txt"
     prefix_path = "data/tiny_stories_train_testing"
+    # input_path = "data/TinyStoriesV2-GPT4-valid.txt"
+    # prefix_path = "data/tiny_stories_train_testing"
 
-    vocab_size = 10000
+    vocab_size = 32000 if "owt_train" in input_path else 10000
     end_of_text_token = "<|endoftext|>"
     special_tokens = [end_of_text_token]
     print(f"Training bpe on path {input_path}")
