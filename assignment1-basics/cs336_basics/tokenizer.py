@@ -62,10 +62,13 @@ def train_bpe(
 
     print("Finished pretokenizing")
     pairs: dict[tuple[bytes, bytes], int] = defaultdict(int)
+    occurs_in = defaultdict(set)
     for tup, cnt in freqs.items():
         for i in range(len(tup) - 1):
             pairs[(tup[i], tup[i + 1])] += cnt
+            occurs_in[tup[i] + tup[i + 1]].add(tup)
 
+    print("Finished constructing initial pairs")
     while vocab_cnt < vocab_size:
         # Find max in pairs to merge
         max_freq = max(pairs.values())
@@ -79,15 +82,10 @@ def train_bpe(
         merges.append(to_merge)
 
         # Update freqs by merging old
-        to_delete: list[tup] = []
+        to_delete: list[tuple] = []
         to_upd: dict[tuple[bytes], int] = defaultdict(int)
-        for tup, cnt in freqs.items():
-            flag = False
-            for i, val in enumerate(tup):
-                if val == to_merge[0] and i != len(tup) - 1 and tup[i + 1] == to_merge[1]:
-                    flag = True
-            if not flag:
-                continue
+        for tup in occurs_in[merged_bytes]:
+            cnt = freqs[tup]
 
             new_list = []
             skip_next = False
@@ -100,12 +98,14 @@ def train_bpe(
                 else:
                     new_list.append(val)
 
+            new_tuple = tuple(new_list)
             for i in range(len(tup) - 1):
                 pairs[(tup[i], tup[i + 1])] -= cnt
             for i in range(len(new_list) - 1):
+                occurs_in[new_list[i] + new_list[i + 1]].add(new_tuple)
                 pairs[(new_list[i], new_list[i + 1])] += cnt
 
-            to_upd[tuple(new_list)] = cnt
+            to_upd[new_tuple] = cnt
             to_delete.append(tup)
 
         for tup in to_delete:
