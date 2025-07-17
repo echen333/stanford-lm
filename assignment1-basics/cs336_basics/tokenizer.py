@@ -1,4 +1,5 @@
 from typing import Iterable, Iterator
+import time
 import regex as re
 import os
 from collections import defaultdict
@@ -42,6 +43,7 @@ def train_bpe(
     vocab_size: int,
     special_tokens: list[str],
 ):
+    start_time = time.time()
     vocab: dict[int, bytes] = {}
     end_of_text_token = "<|endoftext|>"
     vocab_cnt = 0
@@ -72,14 +74,14 @@ def train_bpe(
             for x, y in chunk_freqs.items():
                 freqs[x] += y
 
-    print("Finished pretokenizing")
+    print("Finished pretokenizing", time.time() - start_time)
     from collections import Counter
 
     pairs: dict[tuple[bytes, bytes], int] = Counter()
     for tup, cnt in freqs.items():
         for i in range(len(tup) - 1):
             pairs[(tup[i], tup[i + 1])] += cnt
-    print("Finished initializing pairs")
+    print("Finished initializing pairs", time.time() - start_time)
 
     ctx = mp.get_context("fork")
     n_procs = os.cpu_count()
@@ -149,7 +151,7 @@ def train_bpe(
                 num_deleted = 0
                 all_keys = list(freqs.keys())
             if vocab_cnt % (vocab_size // 25) == 0:
-                print(f"Have {vocab_cnt} tokens in vocab now")
+                print(f"Have {vocab_cnt} tokens in vocab now", time.time() - start_time)
 
     return vocab, merges
 
