@@ -8,6 +8,8 @@ import cProfile
 import regex as re
 from collections import defaultdict
 from multiprocessing import Pool
+import multiprocessing as mp
+from itertools import repeat
 
 
 def bpe_get_freqs_per_chunk(input_path, start, end, split_pattern):
@@ -23,6 +25,16 @@ def bpe_get_freqs_per_chunk(input_path, start, end, split_pattern):
             tmp2 = [bytes([x]) for x in tmp]
             freqs2[tuple(tmp2)] += 1
     return freqs2
+
+
+def find_tups(chunk, search_bytes):
+    ret = []
+    for tup in chunk:
+        for i, val in enumerate(tup):
+            if val == search_bytes[0] and i != len(tup) - 1 and tup[i + 1] == search_bytes[1]:
+                ret.append(tup)
+                break
+    return ret
 
 
 def train_bpe(
@@ -61,14 +73,23 @@ def train_bpe(
                 freqs[x] += y
 
     print("Finished pretokenizing")
-    pairs: dict[tuple[bytes, bytes], int] = defaultdict(int)
-    occurs_in = defaultdict(set)
+    from collections import Counter
+
+    pairs: dict[tuple[bytes, bytes], int] = Counter()
     for tup, cnt in freqs.items():
         for i in range(len(tup) - 1):
             pairs[(tup[i], tup[i + 1])] += cnt
-            occurs_in[tup[i] + tup[i + 1]].add(tup)
+    print("Finished initializing pairs")
 
-    print("Finished constructing initial pairs")
+    ctx = mp.get_context("fork")
+    n_procs = os.cpu_count()
+    # n_procs = 4
+    # all_keys = list(freqs.keys())
+
+    all_keys = list(freqs.keys())
+    num_deleted = 0
+    num_all_keys = len(all_keys)
+
     while vocab_cnt < vocab_size:
         # Find max in pairs to merge
         max_freq = max(pairs.values())
@@ -82,11 +103,20 @@ def train_bpe(
         merges.append(to_merge)
 
         # Update freqs by merging old
-        to_delete: list[tuple] = []
-        to_upd: dict[tuple[bytes], int] = defaultdict(int)
-        for tup in occurs_in[merged_bytes]:
-            cnt = freqs[tup]
+        tups_with_merged = []
+        chunks = [all_keys[i::n_procs] for i in range(n_procs)]
 
+        with ctx.Pool(n_procs) as pool:
+            partials = pool.starmap(find_tups, zip(chunks, repeat(to_merge)))
+        # partials = [find_tups(chunks[0], to_merge)] # if n_procs is 1
+
+        for partial in partials:
+            tups_with_merged.extend(partial)
+
+        to_delete: list[tup] = []
+        to_upd: dict[tuple[bytes], int] = defaultdict(int)
+        for tup in tups_with_merged:
+            cnt = freqs[tup]
             new_list = []
             skip_next = False
             for i, val in enumerate(tup):
@@ -98,24 +128,28 @@ def train_bpe(
                 else:
                     new_list.append(val)
 
-            new_tuple = tuple(new_list)
             for i in range(len(tup) - 1):
                 pairs[(tup[i], tup[i + 1])] -= cnt
             for i in range(len(new_list) - 1):
-                occurs_in[new_list[i] + new_list[i + 1]].add(new_tuple)
                 pairs[(new_list[i], new_list[i + 1])] += cnt
 
-            to_upd[new_tuple] = cnt
+            to_upd[tuple(new_list)] = cnt
             to_delete.append(tup)
 
         for tup in to_delete:
             del freqs[tup]
+        num_deleted += len(to_delete)
 
         for tup, cnt in to_upd.items():
             freqs[tup] += cnt
+            all_keys.append(tup)
 
         del pairs[(to_merge[0], to_merge[1])]
 
+        if int(3 * num_deleted) > num_all_keys:
+            print("RESET all_keys")
+            num_deleted = 0
+            all_keys = list(freqs.keys())
         if vocab_cnt % (vocab_size // 25) == 0:
             print(f"Have {vocab_cnt} tokens in vocab now")
 
@@ -236,12 +270,12 @@ def encode_text_to_npy(data_path, path_prefix: str, special_tokens=None):
 def main():
     # input_path = "data/owt_train.txt"
     # prefix_path = "data/owt_train"
-    input_path = "data/owt_valid.txt"
-    prefix_path = "data/owt_valid"
+    # input_path = "data/owt_valid.txt"
+    # prefix_path = "data/owt_valid"
     # input_path = "data/TinyStoriesV2-GPT4-train.txt"
-    # prefix_path = "data/tiny_stories_train"
-    # input_path = "data/TinyStoriesV2-GPT4-valid.txt"
-    # prefix_path = "data/tiny_stories_val"
+    # prefix_path = "data/tiny_stories_train_testing"
+    input_path = "data/TinyStoriesV2-GPT4-valid.txt"
+    prefix_path = "data/tiny_stories_train_testing"
 
     vocab_size = 10000
     end_of_text_token = "<|endoftext|>"
