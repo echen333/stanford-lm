@@ -4,10 +4,12 @@ import regex as re
 import os
 from collections import defaultdict
 import cProfile
+import sys
+import pickle
 
 
 import regex as re
-from collections import defaultdict
+from collections import defaultdict, Counter
 from multiprocessing import Pool
 import multiprocessing as mp
 from itertools import repeat
@@ -38,6 +40,56 @@ def find_tups(chunk, search_bytes):
     return ret
 
 
+def find_tups2(ind, pth, search_bytes):
+    ret = []
+    upd_pairs = Counter()
+    data_path = os.path.join(pth, f"data_{ind}.pkl")
+    with open(data_path, "rb") as f:
+        obj = pkl.load(f)
+
+    for tup in obj:
+        for i, val in enumerate(tup[:-1]):
+            if val == search_bytes[0] and tup[i + 1] == search_bytes[1]:
+                ret.append(tup)
+                break
+
+    merged_bytes = search_bytes[0] + search_bytes[1]
+    for tup in ret:
+        cnt = obj[tup]
+        new_list = []
+        skip_next = False
+        for i, val in enumerate(tup):
+            if skip_next:
+                skip_next = False
+            elif val == search_bytes[0] and i != len(tup) - 1 and tup[i + 1] == search_bytes[1]:
+                skip_next = True
+                new_list.append(merged_bytes)
+            else:
+                new_list.append(val)
+
+        for i in range(len(tup) - 1):
+            upd_pairs[(tup[i], tup[i + 1])] -= cnt
+        for i in range(len(new_list) - 1):
+            upd_pairs[(new_list[i], new_list[i + 1])] += cnt
+
+        del obj[tup]
+        obj[tuple(new_list)] = cnt
+
+    with open(data_path, "wb") as f:
+        pkl.dump(obj, f)
+        del obj
+
+    return upd_pairs
+
+
+def deep_dict_sizeof(dic):
+    tot_size = 0
+    for k, v in dic.items():
+        tot_size += sys.getsizeof(k)
+        tot_size += sys.getsizeof(v)
+    return tot_size
+
+
 def train_bpe(
     input_path: str | os.PathLike,
     vocab_size: int,
@@ -63,6 +115,9 @@ def train_bpe(
     from cs336_basics.pretokenization_example import find_chunk_boundaries
 
     split_pattern = "|".join(special_tokens)
+    ctx = mp.get_context("fork")
+    n_procs = os.cpu_count()
+    n_chunks = os.cpu_count() * 2
     with open(input_path, "rb") as f:
         boundaries = find_chunk_boundaries(f, os.cpu_count(), end_of_text_token.encode())
 
@@ -75,7 +130,6 @@ def train_bpe(
                 freqs[x] += y
 
     print("Finished pretokenizing", time.time() - start_time)
-    from collections import Counter
 
     pairs: dict[tuple[bytes, bytes], int] = Counter()
     for tup, cnt in freqs.items():
@@ -83,16 +137,20 @@ def train_bpe(
             pairs[(tup[i], tup[i + 1])] += cnt
     print("Finished initializing pairs", time.time() - start_time)
 
-    ctx = mp.get_context("fork")
-    n_procs = os.cpu_count()
-    # n_procs = 4
-    # all_keys = list(freqs.keys())
+    # initialize pkl split
+    pkl_dir = os.path.join(os.path.dirname(Path(input_path)), "pkl")
+    os.makedirs(pkl_dir, exist_ok=True)
+    freqs_keys = list(freqs.keys())
+    freqs_chunks = [freqs_keys[i::n_chunks] for i in range(n_chunks)]
+    for i in range(n_chunks):
+        with open(os.path.join(pkl_dir, f"data_{i}.pkl"), "wb") as f:
+            obj = {x: freqs[x] for x in freqs_chunks[i]}
+            pickle.dump(obj, f)
+    print("Finished dumping freqs")
 
-    all_keys = list(freqs.keys())
-    num_deleted = 0
-    num_all_keys = len(all_keys)
+    print("len of freqs", len(freqs.items()), deep_dict_sizeof(freqs))
+    del freqs
 
-    # Create pool once and reuse it - this eliminates the overhead of creating pools every iteration
     with ctx.Pool(n_procs) as pool:
         while vocab_cnt < vocab_size:
             to_merge = max(pairs.items(), key=lambda x: (x[1], x[0]))[0]
@@ -103,55 +161,19 @@ def train_bpe(
             add_vocab(merged_bytes)
             merges.append(to_merge)
 
-            # Update freqs by merging old
-            tups_with_merged = []
-            chunks = [all_keys[i::n_procs] for i in range(n_procs)]
+            chunks = [i for i in range(n_chunks)]
+            # Load pickled chunks and search for merged_bytes
+            pairs_updates = pool.starmap(find_tups2, zip(chunks, repeat(pkl_dir), repeat(to_merge)))
 
-            partials = pool.starmap(find_tups, zip(chunks, repeat(to_merge)))
-            # partials = [find_tups(chunks[0], to_merge)] # if n_procs is 1
-
-            for partial in partials:
-                tups_with_merged.extend(partial)
-
-            to_delete: list[tup] = []
-            to_upd: dict[tuple[bytes], int] = defaultdict(int)
-            for tup in tups_with_merged:
-                cnt = freqs[tup]
-                new_list = []
-                skip_next = False
-                for i, val in enumerate(tup):
-                    if skip_next:
-                        skip_next = False
-                    elif i != len(tup) - 1 and val == to_merge[0] and tup[i + 1] == to_merge[1]:
-                        skip_next = True
-                        new_list.append(merged_bytes)
-                    else:
-                        new_list.append(val)
-
-                for i in range(len(tup) - 1):
-                    pairs[(tup[i], tup[i + 1])] -= cnt
-                for i in range(len(new_list) - 1):
-                    pairs[(new_list[i], new_list[i + 1])] += cnt
-
-                to_upd[tuple(new_list)] = cnt
-                to_delete.append(tup)
-
-            for tup in to_delete:
-                del freqs[tup]
-            num_deleted += len(to_delete)
-
-            for tup, cnt in to_upd.items():
-                freqs[tup] += cnt
-                all_keys.append(tup)
+            for update in pairs_updates:
+                for k, v in update.items():
+                    pairs[k] += v
 
             del pairs[(to_merge[0], to_merge[1])]
 
-            if int(3 * num_deleted) > num_all_keys:
-                # print("RESET all_keys")
-                num_deleted = 0
-                all_keys = list(freqs.keys())
             if vocab_cnt % (vocab_size // 25) == 0:
                 print(f"Have {vocab_cnt} tokens in vocab now", time.time() - start_time)
+                print(f"Pairs size of {deep_dict_sizeof(pairs)}")
 
     return vocab, merges
 
@@ -268,14 +290,14 @@ def encode_text_to_npy(data_path, path_prefix: str, special_tokens=None):
 
 
 def main():
-    input_path = "data/owt_train.txt"
-    prefix_path = "data/owt_train"
+    # input_path = "data/owt_train.txt"
+    # prefix_path = "data/owt_train"
     # input_path = "data/owt_valid.txt"
-    # prefix_path = "data/owt_valid"
+    # prefix_path = "data/owt_valid_test"
     # input_path = "data/TinyStoriesV2-GPT4-train.txt"
     # prefix_path = "data/tiny_stories_train_testing"
-    # input_path = "data/TinyStoriesV2-GPT4-valid.txt"
-    # prefix_path = "data/tiny_stories_train_testing"
+    input_path = "data/TinyStoriesV2-GPT4-valid.txt"
+    prefix_path = "data/tiny_stories_train_testing"
 
     vocab_size = 32000 if "owt_train" in input_path else 10000
     end_of_text_token = "<|endoftext|>"
@@ -288,11 +310,11 @@ def main():
     merges_txt_path = f"{prefix_path}_{vocab_size}_merges.pkl"
     save_bpe_state(vocab, merges, vocab_json_path, merges_txt_path)
 
-    tokenizer: Tokenizer = Tokenizer.from_files(vocab_json_path, merges_txt_path, special_tokens)
-    print(tokenizer.vocab)
-    print(tokenizer.merges)
+    # tokenizer: Tokenizer = Tokenizer.from_files(vocab_json_path, merges_txt_path, special_tokens)
+    # print(tokenizer.vocab)
+    # print(tokenizer.merges)
 
 
 if __name__ == "__main__":
-    # cProfile.run("main()")
-    main()
+    cProfile.run("main()")
+    # main()
