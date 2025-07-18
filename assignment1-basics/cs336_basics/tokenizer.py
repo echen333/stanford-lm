@@ -11,6 +11,7 @@ from collections import defaultdict, Counter
 from multiprocessing import Pool
 import multiprocessing as mp
 from itertools import repeat
+import numpy as np
 
 
 def bpe_get_freqs_per_chunk(input_path, start, end, split_pattern):
@@ -220,33 +221,45 @@ class Tokenizer:
 
         return re.split(pat, text)
 
+    def _encode_bytes(self, arr: list[bytes]):
+        tmp2 = arr
+        for merge in self.merges:
+            tmp3 = []
+            skip_next = False
+            for idx, val in enumerate(tmp2):
+                if skip_next:
+                    skip_next = False
+                elif idx != len(arr) - 1 and val == merge[0] and arr[idx + 1] == merge[1]:
+                    skip_next = True
+                    tmp3.append(merge[0] + merge[1])
+                else:
+                    tmp3.append(val)
+            tmp2 = tmp3
+        return [self.to_id[x] for x in tuple(tmp2)]
+
     def encode(self, text: str) -> list[int]:
         """Encode an input text into a sequence of token IDs."""
         # split across special tokens -> pretokenize -> apply merges
         PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
         ret = []
 
-        for split in self._split_on_special(text):
-            if self.special_tokens is not None and split in self.special_tokens:
-                ret.append(self.to_id[split.encode()])
-                continue
+        with Pool(os.cpu_count()) as pool:
+            for split in self._split_on_special(text):
+                if self.special_tokens is not None and split in self.special_tokens:
+                    ret.append(self.to_id[split.encode()])
+                    continue
 
-            for m in re.finditer(PAT, split):
-                tmp = m.group().encode()
-                tmp2: list[bytes] = [bytes([x]) for x in tmp]
-                for merge in self.merges:
-                    tmp3 = []
-                    skip_next = False
-                    for idx, val in enumerate(tmp2):
-                        if skip_next:
-                            skip_next = False
-                        elif idx != len(tmp2) - 1 and val == merge[0] and tmp2[idx + 1] == merge[1]:
-                            skip_next = True
-                            tmp3.append(merge[0] + merge[1])
-                        else:
-                            tmp3.append(val)
-                    tmp2 = tmp3
-                ret.extend([self.to_id[x] for x in tmp2])
+                tot = []
+                for m in re.finditer(PAT, split):
+                    tmp = m.group().encode()
+                    tmp2: list[bytes] = [bytes([x]) for x in tmp]
+                    tot.append(tmp2)
+
+                # print("tot", tot[:100])
+                tot_ints = pool.map(self._encode_bytes, tot)
+
+                for arr in tot_ints:
+                    ret.extend(arr)
 
         return ret
 
@@ -287,13 +300,13 @@ def encode_text_to_npy(data_path, path_prefix: str, special_tokens=None):
     pass
 
 
-def main():
-    # input_path = "data/owt_train.txt"
-    # prefix_path = "data/owt_train"
+def train_main():
+    input_path = "data/owt_train.txt"
+    prefix_path = "data/owt_train"
     # input_path = "data/owt_valid.txt"
     # prefix_path = "data/owt_valid_test"
-    input_path = "data/TinyStoriesV2-GPT4-train.txt"
-    prefix_path = "data/tiny_stories_train_testing"
+    # input_path = "data/TinyStoriesV2-GPT4-train.txt"
+    # prefix_path = "data/tiny_stories_train_testing"
     # input_path = "data/TinyStoriesV2-GPT4-valid.txt"
     # prefix_path = "data/tiny_stories_train_testing"
 
@@ -308,11 +321,41 @@ def main():
     merges_txt_path = f"{prefix_path}_{vocab_size}_merges.pkl"
     save_bpe_state(vocab, merges, vocab_json_path, merges_txt_path)
 
-    # tokenizer: Tokenizer = Tokenizer.from_files(vocab_json_path, merges_txt_path, special_tokens)
+
+def encode_main():
+    input_path = "data/TinyStoriesV2-GPT4-train.txt"
+    prefix_path = "data/tiny_stories"
+    vocab_size = 10000
+
+    end_of_text_token = "<|endoftext|>"
+    special_tokens = [end_of_text_token]
+
+    vocab_json_path = f"{prefix_path}_{vocab_size}_vocab.json"
+    merges_txt_path = f"{prefix_path}_{vocab_size}_merges.pkl"
+
+    tokenizer: Tokenizer = Tokenizer.from_files(vocab_json_path, merges_txt_path, special_tokens)
     # print(tokenizer.vocab)
     # print(tokenizer.merges)
+
+    start_time = time.time()
+    with open(input_path, "r") as f:
+        tmp = f.read()
+
+    print("LEN", len(tmp))
+    tmp = tmp[:300000]
+    print("tmp took time", time.time() - start_time)
+    ret = tokenizer.encode(tmp)
+    print("encoding took time", time.time() - start_time)
+    # print("ret", ret)
+    arr = np.array(ret, np.uint16)
+    print("arr", arr[:100], len(arr))
+
+    base, _ = os.path.splitext(input_path)
+    np.save(os.path.join(base + ".npy"), arr)
+    print("saved")
 
 
 if __name__ == "__main__":
     # cProfile.run("main()")
-    main()
+    # train_main()
+    encode_main()
