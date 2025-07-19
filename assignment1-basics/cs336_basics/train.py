@@ -14,9 +14,11 @@ from cs336_basics.tokenizer import Tokenizer
 from omegaconf import OmegaConf
 from hydra.utils import instantiate
 import numpy as np
+from torch import Tensor
 
 
-@hydra.main(config_path="conf", config_name="config", version_base=None)
+# @hydra.main(config_path="conf", config_name="config", version_base=None)
+@hydra.main(config_path="conf", config_name="config_small", version_base=None)
 def main(cfg):
     print(cfg)
     model: Transformer = instantiate(cfg.model)
@@ -31,11 +33,13 @@ def main(cfg):
     dataset = np.load(cfg.data_path, mmap_mode="r")
     print(dataset[:100], "max", np.max(dataset))
     for step in range(cfg.max_steps):
-        x, y = get_batch(dataset, 32, 32, "cpu")
+        x, y = get_batch(dataset, cfg.batch_size, model.context_length, "cpu")
         print("x, y", x.dtype, y.dtype)
-        print(torch.max(x.to(torch.float32)))
-        print(f"step {step}", x.shape, y.shape, x.dtype)
-        out = model(x)
+        out: Tensor = model(x)
+
+        out = out.flatten(0, 1)  # of shape B C V -> (B*C) V
+        y = y.flatten(0, 1)
+
         loss = cross_entropy(out, y)
         optim.zero_grad()
         loss.backward()

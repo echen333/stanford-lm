@@ -1,5 +1,5 @@
 _target_: utils.Transformer
-vocab_size: 50_000
+vocab_size: 10_000
 d_model: 768
 num_heads: 12
 d_ff: 3072

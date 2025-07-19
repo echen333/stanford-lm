@@ -12,6 +12,9 @@ from multiprocessing import Pool
 import multiprocessing as mp
 from itertools import repeat
 import numpy as np
+from pathlib import Path
+import json, base64
+import pickle as pkl
 
 
 def bpe_get_freqs_per_chunk(input_path, start, end, split_pattern):
@@ -332,13 +335,13 @@ class Tokenizer:
         tmp = np.load(f"{save_base}_chunk_0.npy")
         print("tmp", tmp[:10])
         arr = np.concat([np.load(f"{save_base}_chunk_{ind}.npy") for ind in range(len(tasks))])
-        print("saving arr", arr[:10])
+        print("saving arr", arr[:100])
         np.save(save_base + ".npy", arr)
 
     def encode_iterable(self, iterable: Iterable[str]) -> Iterator[int]:
         """Given an iterable of strings (e.g., a Python file handle), return a generator that lazily yields token IDs. This is required for memory-eﬀicient tokenization of large files that we cannot directly load into memory."""
         for text in iterable:
-            data = self.encode(text)  # should reimpl the extend part or this ok?
+            data = self.encode(text)
             yield from data
 
     def decode(self, ids: list[int]) -> str:
@@ -350,26 +353,12 @@ class Tokenizer:
         return encoded_bytes.decode(errors="replace")
 
 
-from pathlib import Path
-import json, base64
-import pickle as pkl
-
-
 def save_bpe_state(vocab: dict[int, bytes], merges, vocab_json_path, merges_path, encoding: str = "latin-1"):
     safe_vocab = {idx: base64.b64encode(b).decode("ascii") for idx, b in vocab.items()}
     Path(vocab_json_path).write_text(json.dumps(safe_vocab, ensure_ascii=False))
 
     with open(merges_path, "wb") as f:
         pkl.dump(merges, f)
-
-
-def encode_text_to_npy(data_path, path_prefix: str, special_tokens=None):
-    vocab_path = path_prefix + "_vocab.json"
-    merges_path = path_prefix + "_merges.pkl"
-    tokenizer = Tokenizer.from_files(vocab_path, merges_path, special_tokens)
-
-    # am i pretokenizing or what idk
-    pass
 
 
 def train_main():
@@ -407,9 +396,8 @@ def encode_main():
     merges_txt_path = f"{prefix_path}_{vocab_size}_merges.pkl"
 
     tokenizer: Tokenizer = Tokenizer.from_files(vocab_json_path, merges_txt_path, special_tokens)
+    print("so common", tokenizer.decode([0, 11, 383, 327, 45, 259, 390, 477, 402, 824]))
     tokenizer.encode_file(input_path)
-    # print(tokenizer.vocab)
-    # print(tokenizer.merges)
 
 
 if __name__ == "__main__":

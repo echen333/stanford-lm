@@ -9,3 +9,4 @@ max_steps: 20_000
 vocab_path: data/tiny_stories_vocab.json
 merges_path: data/tiny_stories_merges.pkl
 data_path: data/TinyStoriesV2-GPT4-valid.npy
+batch_size: 32
