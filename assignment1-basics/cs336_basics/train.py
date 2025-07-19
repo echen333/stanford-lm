@@ -66,10 +66,7 @@ def main(cfg):
     run = wandb.init(entity="eddys", project="stanford-lm-1", config=wandb_cfg)
     model: Transformer = instantiate(cfg.model)
     optim: AdamW = instantiate(cfg.optimizer, model.parameters())
-    # end_of_text_token = "<|endoftext|>"
-    # tokenizer = Tokenizer.from_files(cfg.vocab_path, cfg.merges_path, [end_of_text_token])
-
-    # tokenizer.enc
+    start_time = time.time()
 
     print("model", model)
     print("optim", optim)
@@ -93,15 +90,16 @@ def main(cfg):
         optim.zero_grad()
         loss.backward()
         optim.step()
+        step_stats = {"loss": loss.item(), "time": time.time() - start_time}
         if step % cfg.val_interval == 0:
-            start_time = time.time()
             valid_loss = evaluate_model(model, validation_ds, cfg.batch_size, 100)
-            print(f"logging {loss.item()}, valid_loss {valid_loss}")
-            run.log({"loss": loss.item(), "valid_loss": valid_loss})
-            print(f"valid took {time.time() - start_time}s with len {len(validation_ds)}")
-        else:
-            run.log({"loss": loss.item()})
-
+            if step == (cfg.max_steps // cfg.val_interval) * cfg.val_interval:
+                print(f"Running final validation set eval at step {step}.")
+                valid_loss = evaluate_model(model, validation_ds, cfg.batch_size)
+            step_stats["valid_loss"] = valid_loss
+            # print(f"valid took {time.time() - start_time}s with len {len(validation_ds)}")
+        
+        run.log(step_stats)
 
         if step % cfg.checkpoint_steps == 0:
             file_path = f"{cfg.checkpoint_path}_{step}.pt"

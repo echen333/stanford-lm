@@ -23,14 +23,20 @@ import numpy.typing as npt
 
 
 class AdamW(optim.Optimizer):
-    def __init__(self, params, lr, weight_decay, betas, eps=1e-8):
+    def __init__(self, params, lr, weight_decay, betas, eps=1e-8, cosine_lr_params: list[float] | None = None):
         defaults = {"lr": lr, "betas": betas, "weight_decay": weight_decay, "eps": eps}
+        assert len(cosine_lr_params) == 4
+        self.cosine_lr_params = cosine_lr_params
+        self.num_steps = 0
         super().__init__(params, defaults)
 
     def step(self, closure: Optional[Callable] = None):
         loss = None if closure is None else closure()
+        self.num_steps += 1
         for group in self.param_groups:
             alpha, beta_1, beta_2 = group["lr"], group["betas"][0], group["betas"][1]
+            if self.cosine_lr_params is not None:
+                alpha = get_lr_cosine_schedule(self.num_steps, *self.cosine_lr_params)
             for p in group["params"]:  # p of type nn.Parameter
                 if p.grad is None:
                     pass
