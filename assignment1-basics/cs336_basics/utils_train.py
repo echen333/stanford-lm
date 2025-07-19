@@ -109,7 +109,7 @@ def save_checkpoint(model, optimizer, iteration, out: str | os.PathLike | typing
 
 
 def load_checkpoint(src, model, optimizer):
-    saved_dict = torch.load(src)
+    saved_dict = torch.load(src, weights_only=False)
     model.load_state_dict(saved_dict["model"])
     optimizer.load_state_dict(saved_dict["optim"])
     return saved_dict["iteration"]

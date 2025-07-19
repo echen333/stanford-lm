@@ -6,8 +6,8 @@ project: cs336-basics
 run_name: ${now:%Y%m%d_%H%M%S}
 seed: 42
 max_steps: 40_000
-vocab_path: data/tiny_stories_vocab.json
-merges_path: data/tiny_stories_merges.pkl
+vocab_path: data/tiny_stories_10000_vocab.json
+merges_path: data/tiny_stories_10000_merges.pkl
 data_path: data/TinyStoriesV2-GPT4-valid.npy
 batch_size: 32
 checkpoint_steps: 4_000

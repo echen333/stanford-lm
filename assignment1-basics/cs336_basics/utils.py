@@ -208,5 +208,20 @@ class Transformer(nn.Module):
     
     def generate(self, start, max_tokens=None):
         tot: Tensor = start
-        out = self(tot)
-        pass
+        tokens_generated = 0
+        print("start", tot)
+        while True:
+            context = tot[-self.context_length:]
+            x = context.unsqueeze(0)
+
+            log_probs = self(x).squeeze(0)
+            log_probs = log_probs[-1, :]
+            probs = softmax(log_probs, -1)
+
+            max_ind = torch.argmax(probs, dim=0)
+            tot = torch.concat([tot, max_ind.unsqueeze(0)])
+
+            tokens_generated += 1
+            if tokens_generated >= max_tokens or max_ind == 0:
+                break
+        return tot
