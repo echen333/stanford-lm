@@ -235,19 +235,19 @@ class Tokenizer:
                 merge_idx = self.merge_to_idx[(val, arr[idx + 1])]
                 if merge_idx not in tot_set:
                     tot_set.add(merge_idx)
-                    heapq.heappush(pq, -merge_idx)
+                    heapq.heappush(pq, merge_idx)
 
         prev = arr
         while pq:
             idx = heapq.heappop(pq)
-            merge = self.merges[-idx]
+            merge = self.merges[idx]
 
             nex = []
             skip_next = False
             for idx, val in enumerate(prev):
                 if skip_next:
                     skip_next = False
-                elif idx != len(arr) - 1 and val == merge[0] and arr[idx + 1] == merge[1]:
+                elif idx != len(prev) - 1 and val == merge[0] and prev[idx + 1] == merge[1]:
                     skip_next = True
                     nex.append(merge[0] + merge[1])
                 else:
@@ -259,8 +259,8 @@ class Tokenizer:
                     merge_idx = self.merge_to_idx[(val, prev[idx + 1])]
                     if merge_idx not in tot_set:
                         tot_set.add(merge_idx)
-                        heapq.heappush(pq, -merge_idx)
-        return [self.to_id[x] for x in tuple(prev)]
+                        heapq.heappush(pq, merge_idx)
+        return [self.to_id[x] for x in prev]
 
     def encode(self, text: str, parallelize=False, chunk_idx=None) -> list[int]:
         """Encode an input text into a sequence of token IDs."""

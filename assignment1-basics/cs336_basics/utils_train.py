@@ -88,8 +88,8 @@ def get_batch(dataset: npt.NDArray, batch_size: int, context_length: int, device
     start_idxs = torch.randint(0, len(dataset) - context_length, tuple([batch_size]))
     all_idxs = start_idxs.reshape(-1, 1) + torch.arange(0, context_length)
     all_idxs.to(device)
-    x = torch.tensor(dataset[all_idxs.reshape(-1, 1)].reshape(batch_size, -1), device=device, dtype=torch.uint16)
-    ret = torch.tensor(dataset[all_idxs.reshape(-1, 1) + 1].reshape(batch_size, -1), device=device, dtype=torch.uint16)
+    x = torch.tensor(dataset[all_idxs.reshape(-1, 1)].reshape(batch_size, -1), device=device, dtype=torch.long)
+    ret = torch.tensor(dataset[all_idxs.reshape(-1, 1) + 1].reshape(batch_size, -1), device=device, dtype=torch.long)
     return (x, ret)
 
 
