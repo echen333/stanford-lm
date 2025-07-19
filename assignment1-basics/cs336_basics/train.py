@@ -19,6 +19,13 @@ import wandb
 from omegaconf import OmegaConf
 
 
+def upload_dataset(path: str):
+    run = wandb.init(entity="eddys", project="stanford-lm-1", job_type="add_dataset")
+    artifact = wandb.Artifact(name=f"tinystories-train", type="dataset")
+    artifact.add_file(local_path=path, name="stories-train")
+    artifact.save()
+
+
 # @hydra.main(config_path="conf", config_name="config", version_base=None)
 @hydra.main(config_path="conf", config_name="config_small", version_base=None)
 def main(cfg):
@@ -34,7 +41,13 @@ def main(cfg):
 
     print("model", model)
     print("optim", optim)
-    dataset = np.load(cfg.data_path, mmap_mode="r")
+
+    artifact = run.use_artifact("eddys/stanford-lm-1/tinystories-train:v0", type="dataset")
+    artifact_dir = artifact.download()
+    print(artifact_dir, type(artifact_dir))
+
+    # dataset = np.load(cfg.data_path, mmap_mode="r")
+    dataset = np.load(f"{artifact_dir}/stories-train", mmap_mode="r")
     print(dataset[:100], "max", np.max(dataset))
     for step in range(1, cfg.max_steps + 1):
         x, y = get_batch(dataset, cfg.batch_size, model.context_length, "cpu")
@@ -58,4 +71,5 @@ def main(cfg):
 
 
 if __name__ == "__main__":
+    # upload_dataset("data/TinyStoriesV2-GPT4-train.npy")
     main()
