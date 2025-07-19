@@ -13,6 +13,7 @@ import hydra, wandb, os, torch, random
 from cs336_basics.tokenizer import Tokenizer
 from omegaconf import OmegaConf
 from hydra.utils import instantiate
+import numpy as np
 
 
 @hydra.main(config_path="conf", config_name="config", version_base=None)
@@ -25,12 +26,17 @@ def main(cfg):
 
     # tokenizer.enc
 
-    # dataset = np.load(, mmap_mode='r')
-    dataset = None
+    print("model", model)
+    print("optim", optim)
+    dataset = np.load(cfg.data_path, mmap_mode="r")
+    print(dataset[:100], "max", np.max(dataset))
     for step in range(cfg.max_steps):
         x, y = get_batch(dataset, 32, 32, "cpu")
-        out = model(x)
-        loss = cross_entropy(out, y)
+        print("x, y", x.dtype, y.dtype)
+        print(torch.max(x.to(torch.float32)))
+        print(f"step {step}", x.shape, y.shape, x.dtype)
+        out = model(x.long())
+        loss = cross_entropy(out, y.long())
         optim.zero_grad()
         loss.backward()
         optim.step()

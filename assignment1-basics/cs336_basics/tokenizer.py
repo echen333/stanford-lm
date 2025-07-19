@@ -89,7 +89,9 @@ def deep_dict_sizeof(dic):
     return tot_size
 
 
-def train_bpe(input_path: str | os.PathLike, vocab_size: int, special_tokens: list[str], prefix_path: str = None):
+def train_bpe(
+    input_path: str | os.PathLike, vocab_size: int, special_tokens: list[str], prefix_path: str = None, debug=False
+):
     start_time = time.time()
     vocab: dict[int, bytes] = {}
     end_of_text_token = "<|endoftext|>"
@@ -166,7 +168,7 @@ def train_bpe(input_path: str | os.PathLike, vocab_size: int, special_tokens: li
 
             del pairs[(to_merge[0], to_merge[1])]
 
-            if vocab_cnt % (vocab_size // 100) == 0:
+            if debug and vocab_cnt % (vocab_size // 100) == 0:
                 print(f"Have {vocab_cnt} tokens in vocab now", time.time() - start_time)
                 print(f"Pairs size of {deep_dict_sizeof(pairs)}")
                 if prefix_path is not None:

@@ -1,8 +1,12 @@
 import torch
 from torch.types import Tensor
+from jaxtyping import Float, Int
 
 
-def cross_entropy(inputs: Tensor, targets: Tensor):
+# def cross_entropy(inputs: Tensor, targets: Tensor):
+def cross_entropy(
+    inputs: Float[Tensor, " batch_size vocab_size"], targets: Int[Tensor, " batch_size"]
+) -> Float[Tensor, ""]:
     shifted_inputs = inputs - inputs.max(dim=-1, keepdim=True)[0]
     seq_len = inputs.shape[-2]
     batch = inputs.shape[0] if inputs.ndim == 3 else 1
@@ -64,11 +68,29 @@ def clip_gradients(params, max_l2_norm, eps=1e-6):
 
 
 def get_batch(dataset: npt.NDArray, batch_size: int, context_length: int, device: str):
+    """
+    Given a dataset (a 1D numpy array of integers) and a desired batch size and
+    context length, sample language modeling input sequences and their corresponding
+    labels from the dataset.
+
+    Args:
+        dataset (np.array): 1D numpy array of integer token IDs in the dataset.
+        batch_size (int): Desired batch size to sample.
+        context_length (int): Desired context length of each sampled example.
+        device (str): PyTorch device string (e.g., 'cpu' or 'cuda:0') indicating the device
+            to place the sampled input sequences and labels on.
+
+    Returns:
+        Tuple of torch.LongTensors of shape (batch_size, context_length). The first tuple item
+        is the sampled input sequences, and the second tuple item is the corresponding
+        language modeling labels.
+    """
     start_idxs = torch.randint(0, len(dataset) - context_length, tuple([batch_size]))
     all_idxs = start_idxs.reshape(-1, 1) + torch.arange(0, context_length)
     all_idxs.to(device)
-    ret = torch.tensor(dataset[all_idxs.reshape(-1, 1) + 1].reshape(batch_size, -1), device=device)
-    return (all_idxs, ret)
+    x = torch.tensor(dataset[all_idxs.reshape(-1, 1)].reshape(batch_size, -1), device=device, dtype=torch.uint16)
+    ret = torch.tensor(dataset[all_idxs.reshape(-1, 1) + 1].reshape(batch_size, -1), device=device, dtype=torch.uint16)
+    return (x, ret)
 
 
 import os
