@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from torch import Tensor
 from einops import einsum, rearrange
 
 
@@ -52,7 +53,7 @@ def silu(x):
     return x * torch.sigmoid(x)
 
 
-def softmax(x, dim):
+def softmax(x, dim, temperature=1):
     mx = torch.max(x, dim, keepdim=True)[0]
     tmp_x = x - mx
     exp_x = torch.exp(tmp_x)
@@ -176,7 +177,6 @@ class TransformerBlock(nn.Module):
 
     def forward(self, x):
         _, seq_len, _ = x.shape
-        print("x device", x.device)
         rms = self.ln1(x)
         y = x + self.attn(rms, torch.arange(0, seq_len))
         rms2 = self.ln2(y)
@@ -204,3 +204,8 @@ class Transformer(nn.Module):
         out = self.ln_final(out)
         probs = self.lm_head(out)
         return probs
+    
+    def generate(self, start, max_tokens=None):
+        tot: Tensor = start
+        out = self(tot)
+        pass

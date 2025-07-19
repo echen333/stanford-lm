@@ -21,8 +21,8 @@ from omegaconf import OmegaConf
 
 def upload_dataset(path: str):
     run = wandb.init(entity="eddys", project="stanford-lm-1", job_type="add_dataset")
-    artifact = wandb.Artifact(name=f"tinystories-train", type="dataset")
-    artifact.add_file(local_path=path, name="stories-train")
+    artifact = wandb.Artifact(name=f"stories-models", type="dataset")
+    artifact.add_file(local_path=path, name="med_700")
     artifact.save()
 
 
@@ -64,11 +64,16 @@ def main(cfg):
         run.log({"loss": loss.item()})
 
         if step % cfg.checkpoint_steps == 0:
-            print(f"Saving checkpoint at step {step} to path {cfg.checkpoint_path}")
-            save_checkpoint(model, optim, step, f"{cfg.checkpoint_path}_{step}.pt")
+            file_path = f"{cfg.checkpoint_path}_{step}.pt"
+            folder = os.path.dirname(file_path)
+            os.makedirs(folder, exist_ok=True)
+            print(f"Saving checkpoint at step {step} to path {file_path}")
+            save_checkpoint(model, optim, step, file_path)
+            wandb.save(file_path)
+
     run.finish()
 
 
 if __name__ == "__main__":
-    # upload_dataset("data/TinyStoriesV2-GPT4-train.npy")
-    main()
+    upload_dataset("checkpoints/med_700.pt")
+    # main()
