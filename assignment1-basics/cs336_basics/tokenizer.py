@@ -189,6 +189,8 @@ class Tokenizer:
         self.special_tokens = (
             list(reversed(sorted(special_tokens, key=lambda x: len(x)))) if special_tokens is not None else None
         )
+        self.offset = len(self.vocab) - len(self.merges)
+        self.merge_to_idx = {x: i for i, x in enumerate(self.merges)}
         self._compiled = None
 
     @classmethod
@@ -222,46 +224,114 @@ class Tokenizer:
         return re.split(pat, text)
 
     def _encode_bytes(self, arr: list[bytes]):
-        tmp2 = arr
-        for merge in self.merges:
-            tmp3 = []
+        import heapq
+
+        pq = []
+        tot_set = set()
+        for idx, val in enumerate(arr[:-1]):
+            if (val, arr[idx + 1]) in self.merge_to_idx:
+                merge_idx = self.merge_to_idx[(val, arr[idx + 1])]
+                if merge_idx not in tot_set:
+                    tot_set.add(merge_idx)
+                    heapq.heappush(pq, -merge_idx)
+
+        prev = arr
+        while pq:
+            idx = heapq.heappop(pq)
+            merge = self.merges[-idx]
+
+            nex = []
             skip_next = False
-            for idx, val in enumerate(tmp2):
+            for idx, val in enumerate(prev):
                 if skip_next:
                     skip_next = False
                 elif idx != len(arr) - 1 and val == merge[0] and arr[idx + 1] == merge[1]:
                     skip_next = True
-                    tmp3.append(merge[0] + merge[1])
+                    nex.append(merge[0] + merge[1])
                 else:
-                    tmp3.append(val)
-            tmp2 = tmp3
-        return [self.to_id[x] for x in tuple(tmp2)]
+                    nex.append(val)
+            prev = nex
 
-    def encode(self, text: str) -> list[int]:
+            for idx, val in enumerate(prev[:-1]):
+                if (val, prev[idx + 1]) in self.merge_to_idx:
+                    merge_idx = self.merge_to_idx[(val, prev[idx + 1])]
+                    if merge_idx not in tot_set:
+                        tot_set.add(merge_idx)
+                        heapq.heappush(pq, -merge_idx)
+        return [self.to_id[x] for x in tuple(prev)]
+
+    def encode(self, text: str, parallelize=False, chunk_idx=None) -> list[int]:
         """Encode an input text into a sequence of token IDs."""
         # split across special tokens -> pretokenize -> apply merges
         PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
         ret = []
 
-        with Pool(os.cpu_count()) as pool:
-            for split in self._split_on_special(text):
-                if self.special_tokens is not None and split in self.special_tokens:
-                    ret.append(self.to_id[split.encode()])
-                    continue
+        from tqdm import tqdm
 
-                tot = []
-                for m in re.finditer(PAT, split):
-                    tmp = m.group().encode()
-                    tmp2: list[bytes] = [bytes([x]) for x in tmp]
-                    tot.append(tmp2)
+        splits = self._split_on_special(text)
+        for ind, split in enumerate(splits):
+            if self.special_tokens is not None and split in self.special_tokens:
+                ret.append(self.to_id[split.encode()])
+                continue
 
-                # print("tot", tot[:100])
-                tot_ints = pool.map(self._encode_bytes, tot)
+            subtasks = []
+            for m in re.finditer(PAT, split):
+                tmp = m.group().encode()
+                tmp2: list[bytes] = [bytes([x]) for x in tmp]
+                subtasks.append(tmp2)
 
-                for arr in tot_ints:
+            if parallelize:
+                with Pool(os.cpu_count()) as pool:
+                    for arr in tqdm(pool.imap(self._encode_bytes, subtasks), desc="Encoding", total=len(subtasks)):
+                        ret.extend(arr)
+            else:
+                for val in subtasks:
+                    arr = self._encode_bytes(val)
                     ret.extend(arr)
 
+            if chunk_idx == 0 and ind % (len(splits) // 25) == 0:
+                print("chunk idx", chunk_idx, " done with ", ind, f"out of {len(splits)}")
+
         return ret
+
+    def _encode_chunk(self, save_base: str, ind: int, input_path: str, start: int, end: int):
+        with open(input_path, "rb") as f:
+            f.seek(start)
+            chunk = f.read(end - start).decode("utf-8", errors="ignore")
+            chunk_encoded = self.encode(chunk, chunk_idx=ind)
+            print("chunk_encoded", len(chunk_encoded), chunk_encoded[:10])
+            arr = np.array(chunk_encoded, np.uint16)
+            np.save(f"{save_base}_chunk_{ind}.npy", arr)
+            print(f"done with chunk {ind}")
+
+    def encode_file(self, input_path: str, save_path: str | None = None):
+        start_time = time.time()
+        from cs336_basics.pretokenization_example import find_chunk_boundaries
+
+        end_of_text_token = "<|endoftext|>"
+
+        if save_path is None:
+            save_path = input_path
+        save_base, _ = os.path.splitext(save_path)
+        with open(input_path, "rb") as f:
+            boundaries = find_chunk_boundaries(f, os.cpu_count(), end_of_text_token.encode())
+
+            print("len boundaries", len(boundaries), boundaries)
+            print("got boundaries", time.time() - start_time)
+
+            tasks = [
+                (save_base, ind, input_path, s, e) for ind, (s, e) in enumerate(zip(boundaries[:-1], boundaries[1:]))
+            ]
+            print("tasks 0", tasks[0])
+            with Pool(os.cpu_count()) as pool:
+                pool.starmap(self._encode_chunk, tasks)
+            print("finished encoding chunks", time.time() - start_time)
+
+        tmp = np.load(f"{save_base}_chunk_0.npy")
+        print("tmp", tmp[:10])
+        arr = np.concat([np.load(f"{save_base}_chunk_{ind}.npy") for ind in range(len(tasks))])
+        print("saving arr", arr[:10])
+        np.save(save_base + ".npy", arr)
 
     def encode_iterable(self, iterable: Iterable[str]) -> Iterator[int]:
         """Given an iterable of strings (e.g., a Python file handle), return a generator that lazily yields token IDs. This is required for memory-eﬀicient tokenization of large files that we cannot directly load into memory."""
@@ -324,6 +394,7 @@ def train_main():
 
 def encode_main():
     input_path = "data/TinyStoriesV2-GPT4-train.txt"
+    # input_path = "data/TinyStoriesV2-GPT4-valid.txt"
     prefix_path = "data/tiny_stories"
     vocab_size = 10000
 
@@ -334,25 +405,9 @@ def encode_main():
     merges_txt_path = f"{prefix_path}_{vocab_size}_merges.pkl"
 
     tokenizer: Tokenizer = Tokenizer.from_files(vocab_json_path, merges_txt_path, special_tokens)
+    tokenizer.encode_file(input_path)
     # print(tokenizer.vocab)
     # print(tokenizer.merges)
-
-    start_time = time.time()
-    with open(input_path, "r") as f:
-        tmp = f.read()
-
-    print("LEN", len(tmp))
-    tmp = tmp[:300000]
-    print("tmp took time", time.time() - start_time)
-    ret = tokenizer.encode(tmp)
-    print("encoding took time", time.time() - start_time)
-    # print("ret", ret)
-    arr = np.array(ret, np.uint16)
-    print("arr", arr[:100], len(arr))
-
-    base, _ = os.path.splitext(input_path)
-    np.save(os.path.join(base + ".npy"), arr)
-    print("saved")
 
 
 if __name__ == "__main__":
