@@ -66,7 +66,6 @@ def clip_gradients(params, max_l2_norm, eps=1e-6):
             if param.grad is not None:
                 param.grad = param.grad * (max_l2_norm / (total_norm + eps))
 
-
 def get_batch(dataset: npt.NDArray, batch_size: int, context_length: int, device: str):
     """
     Given a dataset (a 1D numpy array of integers) and a desired batch size and

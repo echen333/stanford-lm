@@ -196,6 +196,7 @@ class Transformer(nn.Module):
         self.lm_head = Linear(d_model, vocab_size, device=device)
         self.context_length = context_length
         self.vocab_size = vocab_size
+        self.device = device
 
     def forward(self, x):
         out = self.token_embeddings(x)

@@ -1,14 +1,15 @@
 # conf/config.yaml
 defaults:
-  - model: transformer_med
+  - model: transformer
   - optimizer: adamw
 project: cs336-basics
 run_name: ${now:%Y%m%d_%H%M%S}
 seed: 42
-max_steps: 20_000
+max_steps: 40_000
 vocab_path: data/tiny_stories_vocab.json
 merges_path: data/tiny_stories_merges.pkl
 data_path: data/TinyStoriesV2-GPT4-valid.npy
 batch_size: 32
-checkpoint_steps: 50
-checkpoint_path: checkpoints/med
+checkpoint_steps: 4_000
+checkpoint_path: checkpoints/tinystories
+val_interval: 400
