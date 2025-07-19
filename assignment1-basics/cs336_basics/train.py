@@ -15,12 +15,16 @@ from omegaconf import OmegaConf
 from hydra.utils import instantiate
 import numpy as np
 from torch import Tensor
+import wandb
+from omegaconf import OmegaConf
 
 
 # @hydra.main(config_path="conf", config_name="config", version_base=None)
 @hydra.main(config_path="conf", config_name="config_small", version_base=None)
 def main(cfg):
-    print(cfg)
+    wandb_cfg = OmegaConf.to_container(cfg, resolve=True, throw_on_missing=True)
+    print(cfg, type(cfg))
+    run = wandb.init(entity="eddys", project="stanford-lm-1", config=wandb_cfg)
     model: Transformer = instantiate(cfg.model)
     optim: AdamW = instantiate(cfg.optimizer, model.parameters())
     # end_of_text_token = "<|endoftext|>"
@@ -32,7 +36,7 @@ def main(cfg):
     print("optim", optim)
     dataset = np.load(cfg.data_path, mmap_mode="r")
     print(dataset[:100], "max", np.max(dataset))
-    for step in range(cfg.max_steps):
+    for step in range(1, cfg.max_steps + 1):
         x, y = get_batch(dataset, cfg.batch_size, model.context_length, "cpu")
         print("x, y", x.dtype, y.dtype)
         out: Tensor = model(x)
@@ -45,6 +49,12 @@ def main(cfg):
         loss.backward()
         optim.step()
         print(f"Loss at step {step} is {loss.item()}")
+        run.log({"loss": loss.item()})
+
+        if step % cfg.checkpoint_steps == 0:
+            print(f"Saving checkpoint at step {step} to path {cfg.checkpoint_path}")
+            save_checkpoint(model, optim, step, f"{cfg.checkpoint_path}_{step}.pt")
+    run.finish()
 
 
 if __name__ == "__main__":

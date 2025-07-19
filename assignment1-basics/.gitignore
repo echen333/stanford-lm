@@ -32,6 +32,8 @@ MANIFEST
 
 *.pkl
 tmp.txt
+checkpoints/
+wandb/
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
