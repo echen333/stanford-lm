@@ -60,15 +60,15 @@ def softmax(x, dim):
 
 
 class Swiglu(nn.Module):
-    def __init__(self, d_model: int, d_ff: int | None = None):
+    def __init__(self, d_model: int, d_ff: int | None = None, device="cpu"):
         """composed of a SiLU activation function and a GLU"""
         super().__init__()
         if d_ff is None:
             d_ff = d_model * 8 // 3
             d_ff = (d_ff // 64) * 64
-        self.w1 = Linear(d_model, d_ff)
-        self.w2 = Linear(d_ff, d_model)
-        self.w3 = Linear(d_model, d_ff)
+        self.w1 = Linear(d_model, d_ff, device=device)
+        self.w2 = Linear(d_ff, d_model, device=device)
+        self.w3 = Linear(d_model, d_ff, device=device)
 
     def forward(self, x):
         W1x = self.w1(x)
@@ -90,6 +90,7 @@ class RoPE(nn.Module):
         assert d_k % 2 == 0
         self.d_k = d_k
         self.max_seq_len = max_seq_len
+        self.device = device
 
     def forward(self, x: torch.Tensor, token_positions: torch.Tensor) -> torch.Tensor:
         """Process an input tensor of shape (..., seq_len, d_k) and return a tensor of the same shape.
@@ -100,8 +101,8 @@ class RoPE(nn.Module):
         denom = 1.0 / (self.theta ** (torch.arange(0, k, 2).float() / k))
         thetas = einsum(token_positions.float(), denom, "... s, k2 -> ... s k2")
 
-        cos_t = torch.cos(thetas)
-        sin_t = torch.sin(thetas)
+        cos_t = torch.cos(thetas).to(device=self.device)
+        sin_t = torch.sin(thetas).to(device=self.device)
 
         rot_T = torch.stack((cos_t, sin_t, -sin_t, cos_t), dim=-1)
         from einops import rearrange
@@ -125,20 +126,21 @@ def scaled_dot_product(Q, K, V, mask=None):
 
 
 class MultiHead_Self_Attention(nn.Module):
-    def __init__(self, d_model, num_heads, theta=None, max_seq_len=None):
+    def __init__(self, d_model, num_heads, theta=None, max_seq_len=None, device="cpu"):
         super().__init__()
         assert d_model % num_heads == 0
         self.num_heads = num_heads
         self.d_k = d_model // num_heads
 
-        self.q_proj = Linear(d_model, d_model)
-        self.k_proj = Linear(d_model, d_model)
-        self.v_proj = Linear(d_model, d_model)
-        self.output_proj = Linear(d_model, d_model)
+        self.q_proj = Linear(d_model, d_model, device)
+        self.k_proj = Linear(d_model, d_model, device)
+        self.v_proj = Linear(d_model, d_model, device)
+        self.output_proj = Linear(d_model, d_model, device=device)
 
         self.rope = None
         if theta is not None and max_seq_len is not None:
-            self.rope = RoPE(theta, self.d_k, max_seq_len)
+            self.rope = RoPE(theta, self.d_k, max_seq_len, device)
+        self.device = device
 
     def forward(self, x, token_positions=None):
         Q = self.q_proj(x)
@@ -154,7 +156,7 @@ class MultiHead_Self_Attention(nn.Module):
             K = self.rope(K, token_positions)
 
         seq = Q.shape[-2]
-        mask = ~torch.triu(torch.ones(seq, seq, dtype=torch.bool), diagonal=1)
+        mask = ~torch.triu(torch.ones(seq, seq, dtype=torch.bool), diagonal=1).to(device=self.device)
         ret = scaled_dot_product(Q, K, V, mask=mask)
         ret = rearrange(ret, "... h seq dk -> ... seq (h dk)")  # ??
         ret = self.output_proj(ret)
@@ -163,16 +165,18 @@ class MultiHead_Self_Attention(nn.Module):
 
 
 class TransformerBlock(nn.Module):
-    def __init__(self, d_model, num_heads, d_ff, theta=None, max_seq_len=None):
+    def __init__(self, d_model, num_heads, d_ff, theta=None, max_seq_len=None, device="cpu"):
         super().__init__()
 
-        self.ln1 = RMSNorm(d_model)
-        self.ln2 = RMSNorm(d_model)
-        self.attn = MultiHead_Self_Attention(d_model, num_heads, theta, max_seq_len)
-        self.ffn = Swiglu(d_model, d_ff)
+        self.ln1 = RMSNorm(d_model, device=device)
+        self.ln2 = RMSNorm(d_model, device=device)
+        self.attn = MultiHead_Self_Attention(d_model, num_heads, theta, max_seq_len, device=device)
+        self.ffn = Swiglu(d_model, d_ff, device=device)
+        self.device = device
 
     def forward(self, x):
         _, seq_len, _ = x.shape
+        print("x device", x.device)
         rms = self.ln1(x)
         y = x + self.attn(rms, torch.arange(0, seq_len))
         rms2 = self.ln2(y)
@@ -186,10 +190,10 @@ class Transformer(nn.Module):
         super().__init__()
         self.token_embeddings = Embedding(vocab_size, d_model, device=device)
         self.layers = nn.ModuleList(
-            [TransformerBlock(d_model, num_heads, d_ff, rope_theta, context_length) for _ in range(num_layers)]
+            [TransformerBlock(d_model, num_heads, d_ff, rope_theta, context_length, device=device) for _ in range(num_layers)]
         )
         self.ln_final = RMSNorm(d_model, device=device)
-        self.lm_head = Linear(d_model, vocab_size)
+        self.lm_head = Linear(d_model, vocab_size, device=device)
         self.context_length = context_length
         self.vocab_size = vocab_size
 

@@ -1,6 +1,6 @@
 # conf/config.yaml
 defaults:
-  - model: transformer
+  - model: transformer_med
   - optimizer: adamw
 project: cs336-basics
 run_name: ${now:%Y%m%d_%H%M%S}
@@ -10,3 +10,5 @@ vocab_path: data/tiny_stories_vocab.json
 merges_path: data/tiny_stories_merges.pkl
 data_path: data/TinyStoriesV2-GPT4-valid.npy
 batch_size: 32
+checkpoint_steps: 1_000
+checkpoint_path: checkpoints/small

@@ -26,8 +26,8 @@ def upload_dataset(path: str):
     artifact.save()
 
 
-# @hydra.main(config_path="conf", config_name="config", version_base=None)
-@hydra.main(config_path="conf", config_name="config_small", version_base=None)
+@hydra.main(config_path="conf", config_name="config", version_base=None)
+# @hydra.main(config_path="conf", config_name="config_small", version_base=None)
 def main(cfg):
     wandb_cfg = OmegaConf.to_container(cfg, resolve=True, throw_on_missing=True)
     print(cfg, type(cfg))
@@ -50,8 +50,7 @@ def main(cfg):
     dataset = np.load(f"{artifact_dir}/stories-train", mmap_mode="r")
     print(dataset[:100], "max", np.max(dataset))
     for step in range(1, cfg.max_steps + 1):
-        x, y = get_batch(dataset, cfg.batch_size, model.context_length, "cpu")
-        print("x, y", x.dtype, y.dtype)
+        x, y = get_batch(dataset, cfg.batch_size, model.context_length, cfg.model.device)
         out: Tensor = model(x)
 
         out = out.flatten(0, 1)  # of shape B C V -> (B*C) V
