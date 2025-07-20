@@ -58,8 +58,7 @@ def evaluate_model(model: Transformer, ds: Dataset, batch_size, num_samples=None
     model.train()
     return total_loss / num_items
 
-@hydra.main(config_path="conf", config_name="config", version_base=None)
-# @hydra.main(config_path="conf", config_name="config_small", version_base=None)
+@hydra.main(config_path="conf", config_name="config-owt", version_base=None)
 def main(cfg):
     wandb_cfg = OmegaConf.to_container(cfg, resolve=True, throw_on_missing=True)
     print(cfg, type(cfg))
@@ -67,18 +66,18 @@ def main(cfg):
     model: Transformer = instantiate(cfg.model)
     optim: AdamW = instantiate(cfg.optimizer, model.parameters())
     start_time = time.time()
+    TOTAL_SECONDS = 90 * 60
 
     print("model", model)
     print("optim", optim)
 
-    artifact = run.use_artifact("eddys/stanford-lm-1/tinystories-train:v0", type="dataset")
-    artifact2 = run.use_artifact("eddys/stanford-lm-1/tinystories-valid:v0", type="dataset")
+    artifact = run.use_artifact("eddys/stanford-lm-1/owt-train:v0", type="dataset")
+    artifact2 = run.use_artifact("eddys/stanford-lm-1/owt-valid:v0", type="dataset")
     artifact_dir = artifact.download()
     artifact_dir2 = artifact2.download()
 
-    # dataset = np.load(cfg.data_path, mmap_mode="r")
-    train_ds = np.load(f"{artifact_dir}/stories-train", mmap_mode="r")
-    validation_ds = np.load(f"{artifact_dir2}/stories-valid", mmap_mode="r")
+    train_ds = np.load(f"{artifact_dir}/owt-train", mmap_mode="r")
+    validation_ds = np.load(f"{artifact_dir2}/owt-valid", mmap_mode="r")
     for step in range(1, cfg.max_steps + 1):
         x, y = get_batch(train_ds, cfg.batch_size, model.context_length, cfg.model.device)
         out: Tensor = model(x)
@@ -101,13 +100,18 @@ def main(cfg):
         
         run.log(step_stats)
 
-        if step % cfg.checkpoint_steps == 0:
+        run_done = time.time() - start_time > TOTAL_SECONDS
+        if step % cfg.checkpoint_steps == 0 or run_done:
             file_path = f"{cfg.checkpoint_path}_{step}.pt"
             folder = os.path.dirname(file_path)
             os.makedirs(folder, exist_ok=True)
             print(f"Saving checkpoint at step {step} to path {file_path}")
             save_checkpoint(model, optim, step, file_path)
             wandb.save(file_path)
+        
+        if run_done:
+            print(f"Early termination due to > {TOTAL_SECONDS}")
+            break
 
     run.finish()
 
