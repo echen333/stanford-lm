@@ -41,7 +41,7 @@
 # uv run cs336_basics/train.py optimizer.cosine_lr_params='[5e-3, 1e-5, 400, 40_000]' max_steps=40_000
 
 
-# BATCH_SIZE_EXPERIMENTS 94-
+# BATCH_SIZE_EXPERIMENTS 94-100
 uv run cs336_basics/train.py batch_size=64 max_steps=10_000
 uv run cs336_basics/train.py batch_size=128 max_steps=5_000
 uv run cs336_basics/train.py batch_size=256 max_steps=2_500
