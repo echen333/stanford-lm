@@ -35,20 +35,18 @@ class RMSNorm(nn.Module):
         super().__init__()
         self.eps = eps
         self.d_model = d_model
-        self.weight = torch.ones(d_model, device=device, dtype=dtype)
-        # self.weight = nn.Parameter(torch.ones(d_model, device=device, dtype=dtype))
+        self.weight = nn.Parameter(torch.ones(d_model, device=device, dtype=dtype))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Process an input tensor of shape (batch_size, sequence_length, d_model) and return a tensor of the same shape."""
         in_dtype = x.dtype
-        # x = x.to(torch.float32)
+        x = x.to(torch.float32)
 
-        return x
-        # RMS = torch.sqrt(torch.sum(torch.square(x), dim=-1) / self.d_model + self.eps)
+        RMS = torch.sqrt(torch.sum(torch.square(x), dim=-1) / self.d_model + self.eps)
 
-        # result = einsum(x, self.weight, "... d, d -> ... d") / torch.unsqueeze(RMS, dim=-1)
+        result = einsum(x, self.weight, "... d, d -> ... d") / torch.unsqueeze(RMS, dim=-1)
 
-        # return result.to(in_dtype)
+        return result.to(in_dtype)
 
 
 def silu(x):
@@ -190,9 +188,9 @@ class TransformerBlock(nn.Module):
 
 
 class Transformer(nn.Module):
-    def __init__(self, vocab_size, d_model, num_heads, d_ff, rope_theta, context_length, num_layers, device=None, dtype=torch.float64):
+    def __init__(self, vocab_size, d_model, num_heads, d_ff, rope_theta, context_length, num_layers, device=None, dtype=torch.float32):
         super().__init__()
-        self.token_embeddings = Embedding(vocab_size, d_model, device=device, dtype=torch.float64)
+        self.token_embeddings = Embedding(vocab_size, d_model, device=device, dtype=dtype)
         self.layers = nn.ModuleList(
             [TransformerBlock(d_model, num_heads, d_ff, rope_theta, context_length, device=device, dtype=dtype) for _ in range(num_layers)]
         )
