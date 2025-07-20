@@ -8,7 +8,7 @@ seed: 42
 max_steps: 40_000
 vocab_path: data/owt_train_32000_vocab.json
 merges_path: data/owt_train_32000_merges.pkl
-batch_size: 32
+batch_size: 64
 checkpoint_steps: 10_000
 checkpoint_path: checkpoints/owt
 val_interval: 400

@@ -64,9 +64,6 @@ class Swiglu(nn.Module):
     def __init__(self, d_model: int, d_ff: int | None = None, device="cpu", dtype=None):
         """composed of a SiLU activation function and a GLU"""
         super().__init__()
-        if d_ff is None:
-            d_ff = d_model * 8 // 3
-            d_ff = (d_ff // 64) * 64
         self.w1 = Linear(d_model, d_ff, device=device, dtype=dtype)
         self.w2 = Linear(d_ff, d_model, device=device, dtype=dtype)
         self.w3 = Linear(d_model, d_ff, device=device, dtype=dtype)
@@ -100,7 +97,7 @@ class RoPE(nn.Module):
         Note that you should tolerate x with an arbitrary number of batch dimensions. You should assume that the token positions are a tensor of shape (..., seq_len) specifying the token positions of x along the sequence dimension. You should use the token positions to slice your (possibly precomputed) cos and sin tensors along the sequence dimension."""
 
         k = self.d_k
-        denom = 1.0 / (self.theta ** (torch.arange(0, k, 2).float() / k))
+        denom = 1.0 / (self.theta ** (torch.arange(0, k, 2).to(self.dtype) / k))
         thetas = einsum(token_positions.to(self.dtype), denom, "... s, k2 -> ... s k2")
 
         cos_t = torch.cos(thetas).to(device=self.device)
@@ -188,8 +185,11 @@ class TransformerBlock(nn.Module):
 
 
 class Transformer(nn.Module):
-    def __init__(self, vocab_size, d_model, num_heads, d_ff, rope_theta, context_length, num_layers, device=None, dtype=torch.float32):
+    def __init__(self, vocab_size, d_model, num_heads, rope_theta, context_length, num_layers, device=None, dtype=torch.float32, d_ff=None):
         super().__init__()
+        if d_ff is None:
+            d_ff = d_model * 8 // 3
+            d_ff = (d_ff // 64) * 64
         self.token_embeddings = Embedding(vocab_size, d_model, device=device, dtype=dtype)
         self.layers = nn.ModuleList(
             [TransformerBlock(d_model, num_heads, d_ff, rope_theta, context_length, device=device, dtype=dtype) for _ in range(num_layers)]

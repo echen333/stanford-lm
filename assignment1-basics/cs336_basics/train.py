@@ -30,11 +30,13 @@ from torch.utils.data import Dataset
 
 def evaluate_model(model: Transformer, ds: Dataset, batch_size, num_samples=None):
     model.eval()
+    model.zero_grad()
 
     total_loss = 0
     num_items = 0
     
     def test(x,y):
+        nonlocal total_loss, num_items
         out = model(x)
         out = out.flatten(0, 1)  # of shape B C V -> (B*C) V
         y = y.flatten(0, 1)
@@ -57,7 +59,6 @@ def evaluate_model(model: Transformer, ds: Dataset, batch_size, num_samples=None
             x, y = get_batch(ds, batch_size, model.context_length, model.device)
             test(x,y)
     
-    print("Num_items", num_items)
     model.train()
     return total_loss / num_items
 
