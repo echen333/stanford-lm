@@ -37,7 +37,7 @@ def evaluate_model(model: Transformer, ds: Dataset, batch_size, num_samples=None
     if num_samples is None:
         start_idxs = torch.arange(0, len(ds) - model.context_length, model.context_length)
         for i in range(0, len(start_idxs), batch_size):
-            batch_idxs = start_idxs[i: i+batch_size]
+            batch_idxs = start_idxs[i: i+batch_size] # TODO: fix for ending if not divisible
             all_idxs = batch_idxs.reshape(-1, 1) + torch.arange(0, model.context_length)
             all_idxs.to(model.device)
             x = torch.tensor(ds[all_idxs.reshape(-1, 1)].reshape(batch_size, -1), device=model.device, dtype=torch.long)
