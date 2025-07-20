@@ -1,9 +1,0 @@
-_target_: utils.Transformer
-vocab_size: 10_000
-d_model: 768
-num_heads: 12
-d_ff: 3072
-rope_theta: 10_000
-context_length: 256
-num_layers: 12
-device: cuda

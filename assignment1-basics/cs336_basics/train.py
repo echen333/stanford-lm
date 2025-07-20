@@ -34,6 +34,14 @@ def evaluate_model(model: Transformer, ds: Dataset, batch_size, num_samples=None
     total_loss = 0
     num_items = 0
     
+    def test(x,y):
+        out = model(x)
+        out = out.flatten(0, 1)  # of shape B C V -> (B*C) V
+        y = y.flatten(0, 1)
+        loss = cross_entropy(out, y)
+        total_loss += loss.item()
+        num_items += 1
+
     if num_samples is None:
         start_idxs = torch.arange(0, len(ds) - model.context_length, model.context_length)
         for i in range(0, len(start_idxs), batch_size):
@@ -42,19 +50,14 @@ def evaluate_model(model: Transformer, ds: Dataset, batch_size, num_samples=None
             all_idxs.to(model.device)
             x = torch.tensor(ds[all_idxs.reshape(-1, 1)].reshape(batch_size, -1), device=model.device, dtype=torch.long)
             y = torch.tensor(ds[all_idxs.reshape(-1, 1) + 1].reshape(batch_size, -1), device=model.device, dtype=torch.long)
+            test(x,y)
 
     else:
         for _ in range(num_samples):
             x, y = get_batch(ds, batch_size, model.context_length, model.device)
-
-    out = model(x)
-    out = out.flatten(0, 1)  # of shape B C V -> (B*C) V
-    y = y.flatten(0, 1)
-    loss = cross_entropy(out, y)
-    total_loss += loss.item()
-    num_items += 1
-
+            test(x,y)
     
+    print("Num_items", num_items)
     model.train()
     return total_loss / num_items
 
@@ -78,6 +81,7 @@ def main(cfg):
 
     train_ds = np.load(f"{artifact_dir}/owt-train", mmap_mode="r")
     validation_ds = np.load(f"{artifact_dir2}/owt-valid", mmap_mode="r")
+    run.log({"time": time.time() - start_time})
     for step in range(1, cfg.max_steps + 1):
         x, y = get_batch(train_ds, cfg.batch_size, model.context_length, cfg.model.device)
         out: Tensor = model(x)

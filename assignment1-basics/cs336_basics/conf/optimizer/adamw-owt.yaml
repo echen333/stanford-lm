@@ -3,4 +3,4 @@ lr: 3e-4
 weight_decay: 0.1
 betas: [0.9, 0.95]
 eps: 1e-8
-cosine_lr_params: [3e-3, 1e-5, 400, 20_000]
+cosine_lr_params: [3e-3, 1e-5, 400, 40_000]
