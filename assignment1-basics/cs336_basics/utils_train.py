@@ -3,10 +3,10 @@ from torch.types import Tensor
 from jaxtyping import Float, Int
 
 
-# def cross_entropy(inputs: Tensor, targets: Tensor):
 def cross_entropy(
     inputs: Float[Tensor, " batch_size vocab_size"], targets: Int[Tensor, " batch_size"]
 ) -> Float[Tensor, ""]:
+    inputs = inputs.to(torch.float32)
     shifted_inputs = inputs - inputs.max(dim=-1, keepdim=True)[0]
     seq_len = inputs.shape[-2]
     batch = inputs.shape[0] if inputs.ndim == 3 else 1

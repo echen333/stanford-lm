@@ -35,7 +35,7 @@ class RMSNorm(nn.Module):
         super().__init__()
         self.eps = eps
         self.d_model = d_model
-        self.weight = nn.Parameter(torch.ones(d_model, device=device, dtype=dtype))
+        self.weight = nn.Parameter(torch.ones(d_model, device=device, dtype=torch.float32))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Process an input tensor of shape (batch_size, sequence_length, d_model) and return a tensor of the same shape."""
@@ -54,10 +54,13 @@ def silu(x):
 
 
 def softmax(x, dim, temperature=1):
-    mx = torch.max(x, dim, keepdim=True)[0]
-    tmp_x = x - mx
-    exp_x = torch.exp(tmp_x)
-    return exp_x / torch.sum(exp_x, dim=dim, keepdim=True)
+    input_dtype = x.dtype
+    x32 = x.to(torch.float32)
+    x32 = x32 - torch.max(x32, dim, keepdim=True)[0]
+    exp_x = torch.exp(x32)
+    res = exp_x / torch.sum(exp_x, dim=dim, keepdim=True)
+
+    return res.to(input_dtype)
 
 
 class Swiglu(nn.Module):
@@ -185,7 +188,7 @@ class TransformerBlock(nn.Module):
 
 
 class Transformer(nn.Module):
-    def __init__(self, vocab_size, d_model, num_heads, rope_theta, context_length, num_layers, device=None, dtype=torch.float32, d_ff=None):
+    def __init__(self, vocab_size, d_model, num_heads, rope_theta, context_length, num_layers, device=None, dtype=torch.bfloat16, d_ff=None):
         super().__init__()
         if d_ff is None:
             d_ff = d_model * 8 // 3

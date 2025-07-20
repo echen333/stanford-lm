@@ -1,10 +1,8 @@
-from cs336_basics.utils_train import ( get_lr_cosine_schedule,
-    clip_gradients,
+from cs336_basics.utils_train import (
     AdamW,
     cross_entropy,
     get_batch,
     save_checkpoint,
-    load_checkpoint,
 )
 from cs336_basics.utils import softmax, Transformer
 
@@ -17,7 +15,6 @@ from torch import Tensor
 import wandb
 from omegaconf import OmegaConf
 import time
-
 
 def upload_dataset(path: str):
     run = wandb.init(entity="eddys", project="stanford-lm-1", job_type="add_dataset")
@@ -37,21 +34,22 @@ def evaluate_model(model: Transformer, ds: Dataset, batch_size, num_samples=None
     
     def test(x,y):
         nonlocal total_loss, num_items
-        out = model(x)
-        out = out.flatten(0, 1)  # of shape B C V -> (B*C) V
-        y = y.flatten(0, 1)
-        loss = cross_entropy(out, y)
-        total_loss += loss.item()
-        num_items += 1
+        with torch.no_grad(), torch.amp.autocast(device_type=model.device,dtype=torch.bfloat16):
+            out = model(x)
+            out = out.flatten(0, 1)  # of shape B C V -> (B*C) V
+            y = y.flatten(0, 1)
+            loss = cross_entropy(out, y)
+            total_loss += loss.item()
+            num_items += 1
 
     if num_samples is None:
         start_idxs = torch.arange(0, len(ds) - model.context_length, model.context_length)
         for i in range(0, len(start_idxs), batch_size):
             batch_idxs = start_idxs[i: i+batch_size] # TODO: fix for ending if not divisible
             all_idxs = batch_idxs.reshape(-1, 1) + torch.arange(0, model.context_length)
-            all_idxs.to(model.device)
-            x = torch.tensor(ds[all_idxs.reshape(-1, 1)].reshape(batch_size, -1), device=model.device, dtype=torch.long)
-            y = torch.tensor(ds[all_idxs.reshape(-1, 1) + 1].reshape(batch_size, -1), device=model.device, dtype=torch.long)
+            # all_idxs = all_idxs.to(model.device)
+            x = torch.tensor(ds[all_idxs.cpu().numpy().reshape(-1)].reshape(batch_size, -1), device=model.device, dtype=torch.long)
+            y = torch.tensor(ds[all_idxs.cpu().numpy().reshape(-1) + 1].reshape(batch_size, -1), device=model.device, dtype=torch.long)
             test(x,y)
 
     else:
@@ -85,12 +83,13 @@ def main(cfg):
     run.log({"time": time.time() - start_time})
     for step in range(1, cfg.max_steps + 1):
         x, y = get_batch(train_ds, cfg.batch_size, model.context_length, cfg.model.device)
-        out: Tensor = model(x)
+        with torch.amp.autocast(device_type=model.device, dtype=torch.bfloat16):
+            out: Tensor = model(x)
+            out = out.flatten(0, 1)  # of shape B C V -> (B*C) V
+            y = y.flatten(0, 1)
 
-        out = out.flatten(0, 1)  # of shape B C V -> (B*C) V
-        y = y.flatten(0, 1)
-
-        loss = cross_entropy(out, y)
+            loss = cross_entropy(out, y)
+        
         optim.zero_grad()
         loss.backward()
         optim.step()
