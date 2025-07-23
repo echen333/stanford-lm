@@ -14,8 +14,7 @@ def forward_pass(model: Transformer, x):
 
 def backward_pass(model: Transformer, loss):
     torch.cuda.synchronize()
-    model.zero_grad()
-    loss.backward()
+    loss.backward(retain_graph=True)
 
 
 def benchmark(data_path, vocab_sz, d_model, n_heads, rope_theta, context_len, n_layers, device):
@@ -30,20 +29,21 @@ def benchmark(data_path, vocab_sz, d_model, n_heads, rope_theta, context_len, n_
 
     for _ in range(NUM_WARMUPS):
         forward_pass(model, x)
-    timer = timeit.timeit("forward_pass(model, x)", number=10)
-    print(timer)
+    timer = timeit.Timer(stmt=lambda: forward_pass(model, x))
+    print(timer.timeit(100))
 
     out = model(x)
     out = out.flatten(0, 1)  # of shape B C V -> (B*C) V
     y = y.flatten(0, 1)
     loss = cross_entropy(out, y)
 
+    print(type(loss))
     for _ in range(NUM_WARMUPS):
         backward_pass(model, loss)
-    timer2 = timeit.timeit("backward_pass(model, loss)", number=10)
-    print(timer2)
+    timer2 = timeit.Timer(stmt=lambda: "backward_pass(model, loss)", setup="")
+    print(timer2.timeit(100))
 
 
 if __name__ == "__main__":
-    data_path = "data/TinyStoriesV2-GPT4-valid.npy"
-    benchmark(data_path, 10000, 128, 2, 10000, 32, 2, "cpu")
+    data_path = "cs336_systems/data/TinyStoriesV2-GPT4-valid.npy"
+    benchmark(data_path, 10000, 128, 2, 10000, 32, 2, "cuda")
