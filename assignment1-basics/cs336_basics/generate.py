@@ -9,10 +9,11 @@ from cs336_basics.train import Transformer, AdamW, softmax
 import yaml
 from torch import Tensor
 
+
 def main():
-    run_name = "lyric-serenity-65"
-    steps = 24000
-    checkpoint_name = f"checkpoints/tinystories_{steps}.pt"
+    run_name = "misty-energy-168"
+    steps = 40000
+    checkpoint_name = f"checkpoints/owt_{steps}.pt"
 
     api = wandb.Api()
     runs = api.runs("stanford-lm-1")
@@ -22,10 +23,9 @@ def main():
 
     with open("config.yaml", "r") as f:
         cfg = yaml.safe_load(f)
-    
-    # need to get rid of wandb values
-    clean_cfg = {k: v["value"] if isinstance(v, dict) and set(v)=={"value"} else v
-         for k,v in cfg.items()}
+
+    # Cleaning wandb values in config
+    clean_cfg = {k: v["value"] if isinstance(v, dict) and set(v) == {"value"} else v for k, v in cfg.items()}
 
     print(clean_cfg)
     omega_cfg = OmegaConf.create(clean_cfg)
@@ -44,15 +44,17 @@ def main():
     end_of_text_token = "<|endoftext|>"
     print("cfg", clean_cfg)
     # tokenizer = Tokenizer.from_files(clean_cfg["vocab_path"], clean_cfg["merges_path"], [end_of_text_token])
-    vocab_path = "data/tiny_stories_10000_vocab.json"
-    merges_path = "data/tiny_stories_10000_merges.pkl"
+    # vocab_path = "data/tiny_stories_10000_vocab.json"
+    # merges_path = "data/tiny_stories_10000_merges.pkl"
+    vocab_path = "data/owt_train_32000_vocab.json"
+    merges_path = "data/owt_train_32000_merges.pkl"
     tokenizer = Tokenizer.from_files(vocab_path, merges_path, [end_of_text_token])
 
     encoded_prompt = torch.tensor(tokenizer.encode(prompt), device=model.device)
     print("encoded_prompt", encoded_prompt, encoded_prompt.dtype)
 
     generated: Tensor = model.generate(encoded_prompt, max_tokens=10000)
-    generated.to('cpu')
+    generated.to("cpu")
     print("generated", generated)
     text = tokenizer.decode(generated.tolist())
     print("output:", text)
