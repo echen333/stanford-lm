@@ -52,6 +52,11 @@ def benchmarking_mixed_precision():
         loss = F.cross_entropy(out, y)
         print(out, out.dtype)
         print(f"loss, {loss.item()} and dtype: {loss.dtype}")
+
+        loss.backward()
+        for p in model.parameters():
+            print("p", p)
+            print("grad", p.grad, p.grad.dtype)
         
 if __name__ == "__main__":
     # mixed_precision_accumulation()

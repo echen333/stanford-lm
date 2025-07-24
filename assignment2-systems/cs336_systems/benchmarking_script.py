@@ -1,10 +1,12 @@
-import cs336_basics
 import torch
 import timeit
 import argparse
+from contextlib import nullcontext
 
-from cs336_basics.utils import Transformer
-from cs336_basics.utils_train import get_batch, cross_entropy
+from cs336_basics.model import BasicsTransformerLM
+from cs336_basics.nn_utils import cross_entropy
+from cs336_basics.data import get_batch
+
 import numpy as np
 import torch.cuda.nvtx as nvtx
 
@@ -16,10 +18,11 @@ def get_args():
     parser.add_argument("--num_layers", type=int, default=12)
     parser.add_argument("--num_heads", type=int, default=12)
     parser.add_argument("--data_path", type=str, default="cs336_systems/data/TinyStoriesV2-GPT4-valid.npy")
+    parser.add_argument("--mixed_precision", type=bool, default=False)
     return parser.parse_args()
 
 
-def model_pass(model: Transformer, x, only_forward=True, y=None):
+def model_pass(model: BasicsTransformerLM, x, only_forward=True, y=None):
     if not only_forward:
         model.zero_grad(set_to_none=True)
 
@@ -41,16 +44,6 @@ def model_pass(model: Transformer, x, only_forward=True, y=None):
     nvtx.range_pop()
 
 def benchmark():
-    # data_path, vocab_sz, d_model, n_heads, rope_theta, context_len, n_layers, device
-    import time
-    time.sleep(2)
-
-
-    import torch
-    torch.cuda.init()
-    torch.tensor([1.0], device='cuda')  # force kernel
-    print("CUDA test done")
-
     args = get_args()
     args.vocab_sz = 10000
     args.rope_theta = 10000
@@ -60,28 +53,24 @@ def benchmark():
     BATCH_SIZE = 4
     NUM_WARMUPS = 5
 
-    model = Transformer(args.vocab_sz, args.d_model, args.num_heads, args.rope_theta, args.context_len, args.num_layers, args.device)
-    print("model", model.device)
+    model = BasicsTransformerLM(args.vocab_sz, args.context_len, args.d_model, args.num_layers, args.num_heads, args.d_ff, args.rope_theta)
+    model.to(args.device)
     arr = np.load(args.data_path, mmap_mode="r")
 
-    print("finished loading")
     x, y = get_batch(arr, BATCH_SIZE, args.context_len, args.device)
 
-    for _ in range(NUM_WARMUPS):
-        model_pass(model, x)
-    print("hihi")
-    timer = timeit.Timer(stmt=lambda: model_pass(model, x))
-    arr = np.array(timer.repeat(100, number=1))
-    print(arr)
-    print(f"statement has mean: {arr.mean()} and std: {arr.std()}")
+    with torch.amp.autocast("cuda", torch.bfloat16) if args.mixed_precision else nullcontext():
+        for _ in range(NUM_WARMUPS):
+            model_pass(model, x)
+        timer = timeit.Timer(stmt=lambda: model_pass(model, x))
+        arr = np.array(timer.repeat(10, number=1))
+        print(f"statement with {args.d_model} and mixed_precision: {args.mixed_precision} has mean: {arr.mean():.3f} and std: {arr.std():.3f}")
 
-    for _ in range(NUM_WARMUPS):
-        model_pass(model, x, only_forward=False, y=y)
-    timer2 = timeit.Timer(stmt=lambda: model_pass(model, x, only_forward=False, y=y), setup="")
-    arr = np.array(timer2.repeat(100, number=1))
-    print(arr)
-    print(f"statement has mean: {arr.mean()} and std: {arr.std()}")
-
+        for _ in range(NUM_WARMUPS):
+            model_pass(model, x, only_forward=False, y=y)
+        timer2 = timeit.Timer(stmt=lambda: model_pass(model, x, only_forward=False, y=y), setup="")
+        arr = np.array(timer2.repeat(10, number=1))
+        print(f"statement with {args.d_model} and mixed_precision: {args.mixed_precision} has mean: {arr.mean():.3f} and std: {arr.std():.3f}")
 
 if __name__ == "__main__":
     benchmark()
